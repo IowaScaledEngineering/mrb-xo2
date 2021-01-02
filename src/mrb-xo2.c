@@ -326,11 +326,11 @@ void xioDirectionSet()
 
 	i2cBuf[0] = I2C_XIO1_ADDRESS;
 	i2cBuf[1] = 0x80 | 0x18;  // 0x80 is auto-increment
-	i2cBuf[2] = 0;
-	i2cBuf[3] = 0;
-	i2cBuf[4] = 0;
-	i2cBuf[5] = 0x40;
-	i2cBuf[6] = 0x05;
+	i2cBuf[2] = 0x00;
+	i2cBuf[3] = 0x00;
+	i2cBuf[4] = 0x00;
+	i2cBuf[5] = 0xF2;
+	i2cBuf[6] = 0x00;
 	i2c_transmit(i2cBuf, 7, 1);
 	while(i2c_busy());
 }
@@ -401,7 +401,7 @@ void xioInputRead()
 	else
 	{
 		xio1Inputs[0] = i2cBuf[1];
-		xio1Inputs[1] = i2cBuf[2];	
+		xio1Inputs[1] = i2cBuf[2];
 	}
 }
 

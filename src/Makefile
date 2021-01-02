@@ -1,12 +1,12 @@
 #*************************************************************************
-#Title:    MRB-CSCN Makefile
+#Title:    MRB-XO2 Makefile
 #Authors:  Michael Petersen <railfan@drgw.net>
 #          Nathan Holmes <maverick@drgw.net>
 #File:     MRB-AVRTEMPLATE Makefile
 #License:  GNU General Public License v3
 #
 #LICENSE:
-#    Copyright (C) 2014 Nathan Holmes and Michael Petersen
+#    Copyright (C) 2021 Nathan Holmes and Michael Petersen
 #
 #    Derived from example WinAVR project Makefile
 #
@@ -25,7 +25,7 @@
 #    
 #*************************************************************************
 
-BASE_NAME = mrb-cp2
+BASE_NAME = mrb-xo2
 
 # ATmega328P 20MHz @ 5.0V
 DEVICE  = atmega328p
@@ -44,7 +44,7 @@ PROGRAMMER_PORT=usb
 
 # MRBus
 DEFINES = -DMRBUS -D$(GITREV) -DI2C_FREQ=400000
-SRCS = mrb-cp2.c busvoltage.c $(MRBUS_DIRECTORY)/mrbus-avr.c $(MRBUS_DIRECTORY)/mrbus-crc.c $(MRBUS_DIRECTORY)/mrbus-queue.c $(I2CLIB_DIRECTORY)/avr-i2c-master.c
+SRCS = mrb-xo2.c busvoltage.c $(MRBUS_DIRECTORY)/mrbus-avr.c $(MRBUS_DIRECTORY)/mrbus-crc.c $(MRBUS_DIRECTORY)/mrbus-queue.c $(I2CLIB_DIRECTORY)/avr-i2c-master.c
 INCS = $(MRBUS_DIRECTORY)/mrbus.h $(MRBUS_DIRECTORY)/mrbus-avr.h $(I2CLIB_DIRECTORY)/avr-i2c-master.h
 
 AVRDUDE = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B1 -F
