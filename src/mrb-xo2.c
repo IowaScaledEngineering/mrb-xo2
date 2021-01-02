@@ -96,7 +96,7 @@ volatile uint8_t events = 0;
 #define PNTS_TIMELOCK_LED     0x01
 
 #define PNTS_LOCAL_DIR        0x01
-#define PNTS_UNLOCK           0x04
+#define PNTS_UNLOCK           0x02
 #define PNTS_CNTL             0x10
 #define PNTS_STATUS           0x40
 
@@ -366,10 +366,13 @@ void xioOutputWrite()
 	if (!i2c_transaction_successful())
 		events |= EVENT_I2C_ERROR;
 
+	memset(i2cBuf, 0, sizeof(i2cBuf));
+
 	i2cBuf[0] = I2C_XIO1_ADDRESS;
 	i2cBuf[1] = 0x80 | 0x08;  // 0x80 is auto-increment
-	for(i=0; i<sizeof(xio1Outputs); i++)
-		i2cBuf[2+i] = xio1Outputs[i];
+//	for(i=0; i<sizeof(xio1Outputs); i++)
+
+//		i2cBuf[2+i] = xio1Outputs[i];
 
 	i2c_transmit(i2cBuf, 2+sizeof(xio1Outputs), 1);
 }
@@ -745,7 +748,7 @@ static inline void vitalLogic()
 
 }
 
-#define pointsUnlockedSwitch()  ((debounced_inputs[1] & PNTS_UNLOCK)?false:true)
+#define pointsUnlockedSwitch()  ((debounced_inputs[0] & PNTS_UNLOCK)?false:true)
 
 int main(void)
 {
