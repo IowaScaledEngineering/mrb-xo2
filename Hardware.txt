@@ -1,0 +1,62 @@
+The AVR version of the MRB-CSCN is a software-only project.  It relies on
+other hardware pieces to make it work.  Specifically, it expects:
+
+- an Awesome Stick as a core (MRB-IAS)
+- an MRB-XIO to do the signal, switch, and turnout I/O
+
+ West M2 -------------------  M2 East
+             \        /
+      M1 -------------------  M1
+
+
+Pin assignment for the XIO:
+
+A0 - Main 1 East End Upper Signal Red
+A1 - Main 1 East End Upper Signal Yellow
+A2 - Main 1 East End Upper Signal Green
+A3 - Main 1 East End Lower Signal Red
+A4 - Main 1 East End Lower Signal Yellow
+A5 - Main 1 East End Lower Signal Green
+A6 - Main 2 East End Upper Signal Red
+A7 - Main 2 East End Upper Signal Yellow
+
+B0 - Main 2 East End Upper Signal Green
+B1 - Main 2 East End Lower Signal Red
+B2 - Main 2 East End Lower Signal Yellow
+B3 - Main 2 East End Lower Signal Green
+B4 - Main 1 West End Upper Signal Red
+B5 - Main 1 West End Upper Signal Yellow
+B6 - Main 1 West End Upper Signal Green
+B7 - Main 1 West End Lower Signal Red
+
+C0 - Main 1 West End Lower Signal Yellow
+C1 - Main 1 West End Lower Signal Green
+C2 - Main 2 West End Upper Signal Red
+C3 - Main 2 West End Upper Signal Yellow
+C4 - Main 2 West End Upper Signal Green
+C5 - Main 2 West End Lower Signal Red
+C6 - Main 2 West End Lower Signal Yellow
+C7 - Main 2 West End Lower Signal Green
+
+D0 - CP Timelock LED (+5V = LED on)
+D1 - CP Timelock Switch (+5=Normal, GND=Unlock)
+D2 - East Crossover Control (EE_OPTIONS:1 (set) Nor=+5V Rev=GND, (clr)Nor=GND Rev=+5V)
+D3 - West Crossover Control (EE_OPTIONS:2 (set) Nor=+5V Rev=GND, (clr)Nor=GND Rev=+5V)
+D4 - East Crossover Turnout Manual Request Switch (+5=Normal, GND=Rev)
+D5 - West Crossover Manual Request Switch (+5=Normal, GND=Rev)
+D6 - East Crossover Position Feedback (Nor=GND, Rev=+5V)
+D7 - West Crossover Position Feedback (Nor=GND, Rev=+5V)
+
+E0 - n/c
+E1 - n/c
+E2 - n/c
+E3 - n/c
+E4 - (via BD4X) West OS occupancy
+E5 - (via BD4X) East OS occupancy
+E6 - (via BD4X) Siding occupancy
+E7 - (via BD4X) Mainline occupancy
+
+Commands:
+<CP# 1-2><M/D - Main/Diverging><E/W/N - clear east/west/none>
+
+
