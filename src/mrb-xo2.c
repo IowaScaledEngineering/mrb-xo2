@@ -1,11 +1,11 @@
 /*************************************************************************
-Title:    MRBus Simple CTC Control Point Node
+Title:    MRBus Simple 3-Way CTC Control Point Node
 Authors:  Nathan D. Holmes <maverick@drgw.net>
 File:     $Id: $
 License:  GNU General Public License v3
 
 LICENSE:
-    Copyright (C) 2020 Nathan Holmes
+    Copyright (C) 2021 Nathan Holmes <maverick@drgw.net>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -31,19 +31,9 @@ LICENSE:
 #include "mrbus.h"
 #include "avr-i2c-master.h"
 #include "busvoltage.h"
+#include "controlpoint.h"
 
-
-typedef enum
-{
-	STATE_LOCKED = 0,
-	STATE_TIMERUN = 1,
-	STATE_UNLOCKED = 2,
-	STATE_RELOCKING = 3
-} turnoutState_t;
-
-turnoutState_t turnoutState = STATE_LOCKED;
-
-void PktHandler(void);
+void PktHandler(CPState_t *cpState);
 
 #define txBuffer_DEPTH 4
 #define rxBuffer_DEPTH 8
@@ -59,152 +49,29 @@ volatile uint8_t events = 0;
 #define EVENT_I2C_ERROR      0x40
 #define EVENT_BLINKY         0x80
 
-#define CONTROLPOINT_1       0x01
-
-#define CLEARANCE_NONE		0x00
-#define CLEARANCE_EAST		0x01
-#define CLEARANCE_WEST		0x02
-
 #define POINTS_NORMAL_SAFE    'M'
 #define POINTS_REVERSE_SAFE   'D'
 #define POINTS_NORMAL_FORCE   'm'
 #define POINTS_REVERSE_FORCE  'd'
 #define POINTS_UNAFFECTED     'X'
 
-#define OCC_OS_SECT           0x01
-#define OCC_VIRT_P_ADJOIN     0x02
-#define OCC_VIRT_P_APPROACH   0x04
-#define OCC_VIRT_M_ADJOIN     0x10
-#define OCC_VIRT_M_APPROACH   0x20
-#define OCC_VIRT_S_ADJOIN     0x40
-#define OCC_VIRT_S_APPROACH   0x80
+// Used for status occupancy byte 0
+#define OCC_M1_OS_SECT          0x01
+#define OCC_M2_OS_SECT          0x02
+#define OCC_VIRT_M1E_ADJOIN     0x04
+#define OCC_VIRT_M1E_APPROACH   0x08
+#define OCC_VIRT_M2E_ADJOIN     0x10
+#define OCC_VIRT_M2E_APPROACH   0x20
+#define OCC_VIRT_M1W_ADJOIN     0x40
+#define OCC_VIRT_M1W_APPROACH   0x80
 
-#define XOCC_P_ADJOIN         0x01
-#define XOCC_P_APPROACH       0x02
-#define XOCC_P_APPROACH2      0x04
-#define XOCC_P_TUMBLE         0x08
-#define XOCC_M_ADJOIN         0x10
-#define XOCC_M_APPROACH       0x20
-#define XOCC_M_APPROACH2      0x40
-#define XOCC_M_TUMBLE         0x80
-
-#define XOCC2_S_ADJOIN        0x01
-#define XOCC2_S_APPROACH      0x02
-#define XOCC2_S_APPROACH2     0x04
-#define XOCC2_S_TUMBLE        0x08
-
-#define PNTS_TIMELOCK_LED     0x01
-
-#define PNTS_LOCAL_DIR        0x01
-#define PNTS_UNLOCK           0x02
-#define PNTS_CNTL             0x10
-#define PNTS_STATUS           0x40
-
-// EEPROM Location Definitions
-#define EE_HEADS_COM_ANODE    0x07
-#define EE_OPTIONS            0x08
-
-#define EE_UNLOCK_TIME        0x09
-// Unlock time in decisecs
-
-#define EE_P_APRCH_ADDR       0x10
-#define EE_P_APRCH2_ADDR      0x11
-#define EE_P_ADJ_ADDR         0x12
-#define EE_M_APRCH_ADDR       0x13
-#define EE_M_APRCH2_ADDR      0x14
-#define EE_M_ADJ_ADDR         0x15
-#define EE_S_APRCH_ADDR       0x16
-#define EE_S_APRCH2_ADDR      0x17
-#define EE_S_ADJ_ADDR         0x18
-#define EE_P_TUMBLE_ADDR      0x19
-#define EE_M_TUMBLE_ADDR      0x1A
-#define EE_S_TUMBLE_ADDR      0x1B
-#define EE_OS_ADDR            0x1C
-
-#define EE_P_APRCH_PKT        0x20
-#define EE_P_APRCH2_PKT       0x21
-#define EE_P_ADJ_PKT          0x22
-#define EE_M_APRCH_PKT        0x23
-#define EE_M_APRCH2_PKT       0x24
-#define EE_M_ADJ_PKT          0x25
-#define EE_S_APRCH_PKT        0x26
-#define EE_S_APRCH2_PKT       0x27
-#define EE_S_ADJ_PKT          0x28
-#define EE_P_TUMBLE_PKT       0x29
-#define EE_M_TUMBLE_PKT       0x2A
-#define EE_S_TUMBLE_PKT       0x2B
-#define EE_OS_PKT             0x2C
-
-#define EE_P_APRCH_BITBYTE    0x30
-#define EE_P_APRCH2_BITBYTE   0x31
-#define EE_P_ADJ_BITBYTE      0x32
-#define EE_M_APRCH_BITBYTE    0x33
-#define EE_M_APRCH2_BITBYTE   0x34
-#define EE_M_ADJ_BITBYTE      0x35
-#define EE_S_APRCH_BITBYTE    0x36
-#define EE_S_APRCH2_BITBYTE   0x37
-#define EE_S_ADJ_BITBYTE      0x38
-#define EE_P_TUMBLE_BITBYTE   0x39
-#define EE_M_TUMBLE_BITBYTE   0x3A
-#define EE_S_TUMBLE_BITBYTE   0x3B
-#define EE_OS_BITBYTE         0x3C
-
-#define EE_P_APRCH_SUBTYPE    0x40
-#define EE_P_APRCH2_SUBTYPE   0x41
-#define EE_P_ADJ_SUBTYPE      0x42
-#define EE_M_APRCH_SUBTYPE    0x43
-#define EE_M_APRCH2_SUBTYPE   0x44
-#define EE_M_ADJ_SUBTYPE      0x45
-#define EE_S_APRCH_SUBTYPE    0x46
-#define EE_S_APRCH2_SUBTYPE   0x47
-#define EE_S_ADJ_SUBTYPE      0x48
-#define EE_P_TUMBLE_SUBTYPE   0x49
-#define EE_M_TUMBLE_SUBTYPE   0x4A
-#define EE_S_TUMBLE_SUBTYPE   0x4B
-#define EE_OS_SUBTYPE         0x4C
-
-
+// Used for status occupancy byte 1
+#define OCC_VIRT_M2W_ADJOIN     0x01
+#define OCC_VIRT_M2W_APPROACH   0x02
 
 uint8_t debounced_inputs[2], old_debounced_inputs[2];
 uint8_t clearance, old_clearance;
-uint8_t occupancy, old_occupancy;
-uint8_t ext_occupancy, old_ext_occupancy;
-uint8_t ext_occupancy2, old_ext_occupancy2;
-uint8_t turnouts, old_turnouts;
 uint8_t clock_a[2] = {0,0}, clock_b[2] = {0,0};
-uint8_t signalHeads[8], old_signalHeads[8];
-
-uint8_t PktDirToClearance(uint8_t pktDir)
-{
-	switch(pktDir)
-	{
-		case 'E':
-			return(CLEARANCE_EAST);
-		case 'W':
-			return(CLEARANCE_WEST);
-		default:
-			return(CLEARANCE_NONE);
-	}
-
-}
-
-// Aspect Definitions
-
-#define ASPECT_LUNAR     0x07
-#define ASPECT_FL_RED    0x06
-#define ASPECT_FL_GREEN  0x05
-#define ASPECT_RED       0x04
-#define ASPECT_FL_YELLOW 0x03
-#define ASPECT_YELLOW    0x02
-#define ASPECT_GREEN     0x01
-#define ASPECT_OFF       0x00
-
-// Signal Head Definitions
-
-#define SIG_PNTS_UPPER 0
-#define SIG_PNTS_LOWER 1
-#define SIG_MAIN       2
-#define SIG_SIDING     3
 
 // ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
 // If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
@@ -216,22 +83,17 @@ uint8_t PktDirToClearance(uint8_t pktDir)
 // If you do remove it, be sure to yank the interrupt handler and ticks/secs as well
 // and the call to this function in the main function
 
-
-volatile uint8_t ticks = 0;
-volatile uint16_t decisecs=0;
-uint16_t update_decisecs=10;
-volatile uint8_t blinkyCounter = 0;
+volatile uint8_t decisecs=0;
 volatile uint8_t buttonLockout=5;
 
+uint8_t updateInterval=10;
 uint8_t i2cResetCounter = 0;
-volatile uint8_t timeCounter = 0;
 
 void initialize100HzTimer(void)
 {
 	// Set up timer 1 for 100Hz interrupts
 	TCNT0 = 0;
 	OCR0A = 0xC2;
-	ticks = 0;
 	decisecs = 0;
 	TCCR0A = _BV(WGM01);
 	TCCR0B = _BV(CS02) | _BV(CS00);
@@ -240,6 +102,9 @@ void initialize100HzTimer(void)
 
 ISR(TIMER0_COMPA_vect)
 {
+	static uint8_t ticks = 0;
+	static uint8_t blinkyCounter = 0;
+
 	if (ticks & 0x01)
 		events |= EVENT_READ_INPUTS;
 
@@ -257,9 +122,6 @@ ISR(TIMER0_COMPA_vect)
 		if (buttonLockout != 0)
 			buttonLockout--;
 
-		if (0 != timeCounter)
-			timeCounter--;
-
 		events |= EVENT_WRITE_OUTPUTS;
 	}
 }
@@ -269,7 +131,6 @@ ISR(TIMER0_COMPA_vect)
 
 void init(void)
 {
-	uint8_t i;
 	// Clear watchdog
 	MCUSR = 0;
 	// If you don't want the watchdog to do system reset, remove this chunk of code
@@ -277,7 +138,7 @@ void init(void)
 	wdt_enable(WDTO_1S);
 	wdt_reset();
 
-	// Initialize MRBus address from EEPROM address 1
+	// Initialize MRBus address from EEPROM address 0
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
 	// Bogus addresses, fix to default address
 	if (0xFF == mrbus_dev_addr || 0x00 == mrbus_dev_addr)
@@ -286,188 +147,101 @@ void init(void)
 		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR, mrbus_dev_addr);
 	}
 
-	update_decisecs = (uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) 
+	uint16_t tmp_updateInterval = (uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) 
 		| (((uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H)) << 8);
 
-	update_decisecs = max(1, update_decisecs);
+	// Don't update more than once per second and max out at 25.5s
+	updateInterval = max(10, min(255L, tmp_updateInterval));
 
 	// Setup ADC for bus voltage monitoring
 	busVoltageMonitorInit();
-
-	// Initialize signals and such
-	for(i=0; i<sizeof(debounced_inputs); i++)
-		debounced_inputs[i] = old_debounced_inputs[i] = 0;
-	
-	for(i=0; i<sizeof(signalHeads); i++)
-		signalHeads[i] = old_signalHeads[i] = ASPECT_RED;
-
-	clearance = old_clearance = 0;
-	occupancy = old_occupancy = 0;
-	ext_occupancy = old_ext_occupancy = 0;
-	ext_occupancy2 = old_ext_occupancy2 = 0;
-	turnouts = old_turnouts = 0;
 }
 
-uint8_t xio1Outputs[4];
-uint8_t xio1Inputs[2];
-
-/* 0x00-0x04 - input registers */
-/* 0x08-0x0C - output registers */
-/* 0x18-0x1C - direction registers - 0 is output, 1 is input */
-
-#define I2C_RESET         0
-#define I2C_OUTPUT_ENABLE 1
-#define I2C_IRQ           2
-#define I2C_XIO1_ADDRESS 0x4E
-
-void xioDirectionSet()
+void SetTurnout(uint8_t turnout, uint8_t points)
 {
-	uint8_t i2cBuf[8];
-
-	i2cBuf[0] = I2C_XIO1_ADDRESS;
-	i2cBuf[1] = 0x80 | 0x18;  // 0x80 is auto-increment
-	i2cBuf[2] = 0x00;
-	i2cBuf[3] = 0x00;
-	i2cBuf[4] = 0x00;
-	i2cBuf[5] = 0xF2;
-	i2cBuf[6] = 0x00;
-	i2c_transmit(i2cBuf, 7, 1);
-	while(i2c_busy());
-}
-
-void xioInitialize()
-{
-	events |= EVENT_I2C_ERROR;
-
-	PORTB &= ~(_BV(I2C_RESET) | _BV(I2C_OUTPUT_ENABLE));
-	DDRB |= _BV(I2C_RESET) | _BV(I2C_OUTPUT_ENABLE);
-	_delay_us(1);
-	PORTB &= ~(_BV(I2C_OUTPUT_ENABLE));
-	PORTB |= _BV(I2C_RESET);
-	_delay_us(1);
-
-	xioDirectionSet();
-	
-	if (i2c_transaction_successful())
-	{
-		buttonLockout = 5;
-		events &= ~(EVENT_I2C_ERROR);
-	}
-}
-
-void xioOutputWrite()
-{
-	uint8_t i2cBuf[8];
-	uint8_t i;
-
-	// Reset the direction, in case noise killed us somehow
-	xioDirectionSet();
-
-	if (!i2c_transaction_successful())
-		events |= EVENT_I2C_ERROR;
-
-	memset(i2cBuf, 0, sizeof(i2cBuf));
-
-	i2cBuf[0] = I2C_XIO1_ADDRESS;
-	i2cBuf[1] = 0x80 | 0x08;  // 0x80 is auto-increment
-//	for(i=0; i<sizeof(xio1Outputs); i++)
-
-//		i2cBuf[2+i] = xio1Outputs[i];
-
-	i2c_transmit(i2cBuf, 2+sizeof(xio1Outputs), 1);
-}
-
-void xioInputRead()
-{
-	uint8_t i2cBuf[4];
-	uint8_t successful = 0;
-
-	if (events & EVENT_I2C_ERROR)
-		return;
-
-	while(i2c_busy());
-
-	if (!i2c_transaction_successful())
-		events |= EVENT_I2C_ERROR;
-
-	i2cBuf[0] = I2C_XIO1_ADDRESS;
-	i2cBuf[1] = 0x80 | 0x03;  // 0x80 is auto-increment, 0x03 is the first register with inputs
-	i2c_transmit(i2cBuf, 2, 0);
-	i2cBuf[0] = I2C_XIO1_ADDRESS | 0x01;
-	i2c_transmit(i2cBuf, 3, 1);
-	while(i2c_busy());
-	successful = i2c_receive(i2cBuf, 3);
-
-	if (!successful)
-		// In the event of a read hose-out, don't put crap in the input buffer
-		events |= EVENT_I2C_ERROR;
-	else
-	{
-		xio1Inputs[0] = i2cBuf[1];
-		xio1Inputs[1] = i2cBuf[2];
-	}
-}
-
-void SetTurnout(uint8_t controlPoint, uint8_t points)
-{
-	uint8_t options = eeprom_read_byte((uint8_t*)EE_OPTIONS);
+	/*uint8_t options = eeprom_read_byte((uint8_t*)EE_OPTIONS);
 
 	if (POINTS_UNAFFECTED == points)
 		return;
 
-	switch(controlPoint)
+	switch(turnout)
 	{
-		case CONTROLPOINT_1:
-			if (POINTS_REVERSE_FORCE == points || (POINTS_REVERSE_SAFE == points && !(occupancy & OCC_OS_SECT)))
+		case TURNOUT_E_XOVER:
+			if (POINTS_REVERSE_FORCE == points || (POINTS_REVERSE_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
 			{
-				turnouts |= PNTS_CNTL;
+				turnouts |= PNTS_EX_CNTL;
 				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
 				if (options & 0x01)
-					xio1Outputs[3] |= PNTS_CNTL;
+					xio1Outputs[2] |= PNTS_EX_CNTL;
 				else
-					xio1Outputs[3] &= ~(PNTS_CNTL); 
+					xio1Outputs[2] &= ~(PNTS_EX_CNTL); 
 			}
-			else if (POINTS_NORMAL_FORCE == points || (POINTS_NORMAL_SAFE == points && !(occupancy & OCC_OS_SECT)))
+			else if (POINTS_NORMAL_FORCE == points || (POINTS_NORMAL_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
 			{
-				turnouts &= ~(PNTS_CNTL);
+				turnouts &= ~(PNTS_EX_CNTL);
 				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
 				if (options & 0x01)
-					xio1Outputs[3] &= ~(PNTS_CNTL); 
+					xio1Outputs[2] &= ~(PNTS_EX_CNTL); 
 				else
-					xio1Outputs[3] |= PNTS_CNTL;
-
+					xio1Outputs[2] |= PNTS_EX_CNTL;
 			}
 			break;
+
+		case TURNOUT_W_XOVER:
+			if (POINTS_REVERSE_FORCE == points || (POINTS_REVERSE_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
+			{
+				turnouts |= PNTS_WX_CNTL;
+				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
+				if (options & 0x02)
+					xio1Outputs[2] |= PNTS_WX_CNTL;
+				else
+					xio1Outputs[2] &= ~(PNTS_WX_CNTL); 
+			}
+			else if (POINTS_NORMAL_FORCE == points || (POINTS_NORMAL_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
+			{
+				turnouts &= ~(PNTS_WX_CNTL);
+				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
+				if (options & 0x02)
+					xio1Outputs[2] &= ~(PNTS_WX_CNTL); 
+				else
+					xio1Outputs[2] |= PNTS_WX_CNTL;
+			}
+			break;
+
 		default:
 			break;
-	}
+	}*/
 }
 
-uint8_t GetTurnout(uint8_t controlPoint)
+uint8_t GetTurnout(uint8_t turnout)
 {
-	switch(controlPoint)
+/*	switch(turnout)
 	{
-		case CONTROLPOINT_1:
-			return ((turnouts & PNTS_CNTL)?1:0);
+		case TURNOUT_E_XOVER:
+			return ((turnouts & PNTS_EX_CNTL)?1:0);
+		case TURNOUT_W_XOVER:
+			return ((turnouts & PNTS_WX_CNTL)?1:0);
 	}
 
-	return(CLEARANCE_NONE);
+	return(0);*/
+	return 0;
 }
 
 uint8_t GetClearance(uint8_t controlPoint)
 {
-	switch(controlPoint)
+/*	switch(controlPoint)
 	{
 		case CONTROLPOINT_1:
 			return(clearance & 0x0F);
 
 	}
-	return(CLEARANCE_NONE);
+	return(CLEARANCE_NONE); */
+	return 0;
 }
 
 void SetClearance(uint8_t controlPoint, uint8_t newClear)
 {
-	if (CLEARANCE_NONE != newClear 
+/*	if (CLEARANCE_NONE != newClear 
 		&& CLEARANCE_EAST  != newClear 
 		&& CLEARANCE_WEST != newClear)
 		return;
@@ -477,11 +251,8 @@ void SetClearance(uint8_t controlPoint, uint8_t newClear)
 		case CONTROLPOINT_1:
 			if (CLEARANCE_NONE != newClear)
 			{
-				if (XOCC_P_TUMBLE & ext_occupancy)
+				if (OCC_OS_SECT & occupancy[0])
 					break;
-				if (OCC_OS_SECT & occupancy)
-					break;
-				// FIXME: logic to prevent the CTC ends lining into each other
 			}
 			clearance &= 0xF0;
 			clearance |= newClear;
@@ -489,172 +260,28 @@ void SetClearance(uint8_t controlPoint, uint8_t newClear)
 
 		default:
 			break;
-	}
+	}*/
 }
 
-void CodeCTCRoute(uint8_t controlPoint, uint8_t newPoints, uint8_t newClear)
+void CodeCTCRoute(uint8_t controlPoint, uint8_t newPointsE, uint8_t newPointsW, uint8_t newClear)
 {
-	SetClearance(controlPoint, newClear);
-	SetTurnout(controlPoint, newPoints);
+	/*SetTurnout(TURNOUT_E_XOVER, newPointsE);
+	SetTurnout(TURNOUT_W_XOVER, newPointsW);
+	SetClearance(controlPoint, newClear);*/
 }
 
 
-// SignalsToOutputs is responsible for converting the signal head aspects in the
-// signalHeads[] array to the physical wires on the XIO.
-// Thus, it's hardware configuration dependent.
 
-/* ASPECT_LUNAR     0x07
- ASPECT_FL_RED    0x06
- ASPECT_FL_GREEN  0x05
- ASPECT_RED       0x04
- ASPECT_FL_YELLOW 0x03
- ASPECT_YELLOW    0x02
- ASPECT_GREEN     0x01
- ASPECT_OFF       0x00 */
-
-typedef struct
+static inline void vitalLogic(CPState_t *cpState)
 {
-	const uint8_t signalHead;
-	const uint8_t redByte;
-	const uint8_t redMask;
-	const uint8_t yellowByte;
-	const uint8_t yellowMask;
-	const uint8_t greenByte;
-	const uint8_t greenMask;
-} SignalPinDefinition;
-
-#define XIO_PORT_A  0
-#define XIO_PORT_B  1
-#define XIO_PORT_C  2
-#define XIO_PORT_D  3
-#define XIO_PORT_E  4
-
-const SignalPinDefinition sigPinDefs[4] = 
-{
-	{SIG_PNTS_UPPER, XIO_PORT_B, _BV(4), XIO_PORT_B, _BV(5), XIO_PORT_B, _BV(6)},
-	{SIG_PNTS_LOWER, XIO_PORT_B, _BV(7), XIO_PORT_C, _BV(0), XIO_PORT_C, _BV(1)},
-	{SIG_MAIN      , XIO_PORT_C, _BV(2), XIO_PORT_C, _BV(3), XIO_PORT_C, _BV(4)},
-	{SIG_SIDING    , XIO_PORT_C, _BV(5), XIO_PORT_C, _BV(6), XIO_PORT_C, _BV(7)}
-};
-
-
-
-void SignalsToOutputs(uint8_t invertSignalOutputs)
-{
-	uint8_t sigDefIdx;
-	for(sigDefIdx=0; sigDefIdx<sizeof(sigPinDefs)/sizeof(SignalPinDefinition); sigDefIdx++)
-	{
-		uint8_t redByte = sigPinDefs[sigDefIdx].redByte;
-		uint8_t redMask = sigPinDefs[sigDefIdx].redMask;
-		uint8_t yellowByte = sigPinDefs[sigDefIdx].yellowByte;
-		uint8_t yellowMask = sigPinDefs[sigDefIdx].yellowMask;
-		uint8_t greenByte = sigPinDefs[sigDefIdx].greenByte;
-		uint8_t greenMask = sigPinDefs[sigDefIdx].greenMask;
-
-		if (invertSignalOutputs & (1<<sigDefIdx))
-		{
-			// For active high signals
-
-			xio1Outputs[redByte] &= ~redMask;
-			xio1Outputs[yellowByte] &= ~yellowMask;
-			xio1Outputs[greenByte] &= ~greenMask;
-
-			switch(signalHeads[sigPinDefs[sigDefIdx].signalHead])
-			{
-				case ASPECT_OFF:
-					break;
-			
-				case ASPECT_GREEN:
-					xio1Outputs[greenByte] |= greenMask;
-					break;
-			
-				case ASPECT_FL_GREEN:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[greenByte] |= greenMask;
-					break;
-
-				case ASPECT_YELLOW:
-					xio1Outputs[yellowByte] |= yellowMask;
-					break;
-			
-				case ASPECT_FL_YELLOW:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[yellowByte] |= yellowMask;
-					break;
-			
-			
-				case ASPECT_RED:
-				case ASPECT_LUNAR: // Can't display, so make like red
-				default:
-					xio1Outputs[redByte] |= redMask;
-					break;
-
-				case ASPECT_FL_RED:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[redByte] |= redMask;
-					break;
-			}
-
-
-		} else {
-			// For active high signals
-
-			xio1Outputs[redByte] |= redMask;
-			xio1Outputs[yellowByte] |= yellowMask;
-			xio1Outputs[greenByte] |= greenMask;
-
-			switch(signalHeads[sigPinDefs[sigDefIdx].signalHead])
-			{
-				case ASPECT_OFF:
-					break;
-			
-				case ASPECT_GREEN:
-					xio1Outputs[greenByte] &= ~greenMask;
-					break;
-			
-				case ASPECT_FL_GREEN:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[greenByte] &= ~greenMask;
-					break;
-
-				case ASPECT_YELLOW:
-					xio1Outputs[yellowByte] &= ~yellowMask;
-					break;
-			
-				case ASPECT_FL_YELLOW:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[yellowByte] &= ~yellowMask;
-					break;
-			
-			
-				case ASPECT_RED:
-				case ASPECT_LUNAR: // Can't display, so make like red
-				default:
-					xio1Outputs[redByte] &= ~redMask;
-					break;
-
-				case ASPECT_FL_RED:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[redByte] &= ~redMask;
-					break;
-			}
-		}
-	}
-}
-
-static inline void vitalLogic()
-{
-	uint8_t turnoutLocked = (!(((turnouts & (PNTS_STATUS))?1:0) ^ ((turnouts & (PNTS_CNTL))?1:0)));
-	uint8_t cleared = CLEARANCE_NONE;
+//	uint8_t turnoutLocked = (!(((turnouts & (PNTS_EX_STATUS | PNTS_WX_STATUS))?1:0) ^ ((turnouts & (PNTS_EX_STATUS | PNTS_WX_STATUS))?1:0)));
+//	uint8_t cleared = CLEARANCE_NONE;
 
 	// Start out with a safe default - everybody red
-	signalHeads[SIG_PNTS_UPPER] = ASPECT_RED;
-	signalHeads[SIG_PNTS_LOWER] = ASPECT_RED;
-	signalHeads[SIG_MAIN] = ASPECT_RED;
-	signalHeads[SIG_SIDING] = ASPECT_RED;
+	CPSignalHeadAllSetAspect(cpState, ASPECT_RED);
 
-	// Drop clearance if we see occupancy
-	if (occupancy & OCC_OS_SECT)
+/*	// Drop clearance if we see occupancy
+	if (occupancy[0] & OCC_OS_SECT)
 		SetClearance(CONTROLPOINT_1, CLEARANCE_NONE);
 
 	cleared = GetClearance(CONTROLPOINT_1);
@@ -662,27 +289,46 @@ static inline void vitalLogic()
 	if (STATE_UNLOCKED == turnoutState || STATE_RELOCKING == turnoutState)
 	{
 
-		if(turnouts & (PNTS_STATUS))
+		if(turnouts & (PNTS_EX_STATUS))
 		{
 			signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_RED;
-			signalHeads[SIG_SIDING] = ASPECT_FL_RED;
+			signalHeads[SIG_MAIN_A] = ASPECT_FL_RED;
 		}
-		else
+		else if (!(turnouts & (PNTS_EX_STATUS)) && (turnouts & (PNTS_WX_STATUS)))
+		{
+			signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_RED;
+			signalHeads[SIG_MAIN_C] = ASPECT_FL_RED;
+		}
+		else if (!(turnouts & (PNTS_EX_STATUS)) && !(turnouts & (PNTS_WX_STATUS)))
 		{
 			signalHeads[SIG_PNTS_UPPER] = ASPECT_FL_RED;
-			signalHeads[SIG_MAIN] = ASPECT_FL_RED;
+			signalHeads[SIG_MAIN_B] = ASPECT_FL_RED;
 		}
+
 	} 
 	else if (turnoutLocked && CLEARANCE_EAST == cleared)
 	{
 		// Eastbound clearance at the east control point means frog->points movement direction
-		uint8_t head = (turnouts & (PNTS_STATUS))?SIG_SIDING:SIG_MAIN;
+		uint8_t head = 0;
 		
-		if (XOCC_P_ADJOIN & ext_occupancy || OCC_OS_SECT & occupancy)
+		if(turnouts & (PNTS_EX_STATUS))
+		{
+			head = SIG_MAIN_A;
+		}
+		else if (!(turnouts & (PNTS_EX_STATUS)) && (turnouts & (PNTS_WX_STATUS)))
+		{
+			head = SIG_MAIN_C;
+		}
+		else if (!(turnouts & (PNTS_EX_STATUS)) && !(turnouts & (PNTS_WX_STATUS)))
+		{
+			head = SIG_MAIN_B;
+		}
+		
+		if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_P_ADJOIN) || (OCC_OS_SECT & occupancy[0]))
 			signalHeads[head] = ASPECT_RED;
-		else if (XOCC_P_APPROACH & ext_occupancy)
+		else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_P_APPROACH))
 			signalHeads[head] = ASPECT_YELLOW;
-		else if (XOCC_P_APPROACH2 & ext_occupancy)
+		else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_P_APPROACH2))
 			signalHeads[head] = ASPECT_FL_YELLOW;
 		else
 			signalHeads[head] = ASPECT_GREEN;
@@ -690,24 +336,36 @@ static inline void vitalLogic()
 	else if (turnoutLocked && CLEARANCE_WEST == cleared)
 	{
 		// Westbound clearance at the east control point means points->frog movement direction	
-		if(turnouts & (PNTS_STATUS))
+		if(turnouts & (PNTS_EX_STATUS))
 		{
 			// Lined to siding
-			if ((OCC_OS_SECT & occupancy) || (XOCC2_S_ADJOIN & ext_occupancy2))
+			if ((OCC_OS_SECT & occupancy[0]) || getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MA_ADJOIN))
 				signalHeads[SIG_PNTS_LOWER] = ASPECT_RED;
-			else if (XOCC2_S_APPROACH & ext_occupancy2)
+			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MA_APPROACH))
 				signalHeads[SIG_PNTS_LOWER] = ASPECT_YELLOW;
-			else if (XOCC2_S_APPROACH2 & ext_occupancy2)
+			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MA_APPROACH2))
 				signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_YELLOW;
 			else
 				signalHeads[SIG_PNTS_LOWER] = ASPECT_GREEN;
-		} else {
-			// Lined to mainline
-			if ( ((OCC_OS_SECT) & occupancy) || (XOCC_M_ADJOIN & ext_occupancy))
+		}
+		else if (!(turnouts & (PNTS_EX_STATUS)) && (turnouts & (PNTS_WX_STATUS)))
+		{
+			if ((OCC_OS_SECT & occupancy[0]) || getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MC_ADJOIN))
+				signalHeads[SIG_PNTS_LOWER] = ASPECT_RED;
+			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MC_APPROACH))
+				signalHeads[SIG_PNTS_LOWER] = ASPECT_YELLOW;
+			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MC_APPROACH2))
+				signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_YELLOW;
+			else
+				signalHeads[SIG_PNTS_LOWER] = ASPECT_GREEN;
+		}
+		else if (!(turnouts & (PNTS_EX_STATUS)) && !(turnouts & (PNTS_WX_STATUS)))
+		{
+			if ((OCC_OS_SECT & occupancy[0]) || getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MB_ADJOIN))
 				signalHeads[SIG_PNTS_UPPER] = ASPECT_RED;
-			else if (XOCC_M_APPROACH & ext_occupancy)
+			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MB_APPROACH))
 				signalHeads[SIG_PNTS_UPPER] = ASPECT_YELLOW;
-			else if (XOCC_M_APPROACH2 & ext_occupancy)
+			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MB_APPROACH2))
 				signalHeads[SIG_PNTS_UPPER] = ASPECT_FL_YELLOW;
 			else
 				signalHeads[SIG_PNTS_UPPER] = ASPECT_GREEN;
@@ -717,46 +375,63 @@ static inline void vitalLogic()
 	// Good news - the signals are already defaulted to red
 
 	// Clear virtual occupancies
-	occupancy &= ~(OCC_VIRT_P_APPROACH | OCC_VIRT_P_ADJOIN | OCC_VIRT_M_APPROACH | OCC_VIRT_M_ADJOIN | OCC_VIRT_S_APPROACH | OCC_VIRT_S_ADJOIN);
+	occupancy[0] &= ~(OCC_VIRT_P_APPROACH | OCC_VIRT_P_ADJOIN | OCC_VIRT_MA_APPROACH | OCC_VIRT_MA_ADJOIN | OCC_VIRT_MB_APPROACH | OCC_VIRT_MB_ADJOIN);
+	occupancy[1] &= ~(OCC_VIRT_MC_APPROACH | OCC_VIRT_MC_ADJOIN);
 
 	// Calculate east CP virtual occupancies
-	if(!(((turnouts & (PNTS_STATUS))?1:0) ^ ((turnouts & (PNTS_CNTL))?1:0)))
+	if(turnoutLocked)
 	{
-		if(ASPECT_FL_RED == signalHeads[SIG_MAIN] || ASPECT_RED == signalHeads[SIG_MAIN])
-			occupancy |= OCC_VIRT_M_ADJOIN;
-		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN])
-			occupancy |= OCC_VIRT_M_APPROACH;
+		if(ASPECT_FL_RED == signalHeads[SIG_MAIN_A] || ASPECT_RED == signalHeads[SIG_MAIN_A])
+			occupancy[0] |= OCC_VIRT_MA_ADJOIN | OCC_VIRT_MA_APPROACH;
+		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN_A])
+			occupancy[0] |= OCC_VIRT_MA_APPROACH;
 
-		if(ASPECT_FL_RED == signalHeads[SIG_SIDING] || ASPECT_RED == signalHeads[SIG_SIDING])
-			occupancy |= OCC_VIRT_S_ADJOIN;
-		else if (ASPECT_YELLOW == signalHeads[SIG_SIDING])
-			occupancy |= OCC_VIRT_S_APPROACH;
+		if(ASPECT_FL_RED == signalHeads[SIG_MAIN_B] || ASPECT_RED == signalHeads[SIG_MAIN_B])
+			occupancy[0] |= OCC_VIRT_MB_ADJOIN | OCC_VIRT_MB_APPROACH;
+		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN_B])
+			occupancy[0] |= OCC_VIRT_MB_APPROACH;
+
+		if(ASPECT_FL_RED == signalHeads[SIG_MAIN_C] || ASPECT_RED == signalHeads[SIG_MAIN_C])
+			occupancy[1] |= OCC_VIRT_MC_ADJOIN | OCC_VIRT_MC_APPROACH;
+		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN_C])
+			occupancy[1] |= OCC_VIRT_MC_APPROACH;
 
 		
 		// Turnout is properly lined one way or the other
-		if ((turnouts & PNTS_STATUS) && ( ASPECT_YELLOW == signalHeads[SIG_PNTS_LOWER] ))
-			occupancy |= OCC_VIRT_P_APPROACH;
-		else if ((!(turnouts & PNTS_STATUS)) && ( ASPECT_YELLOW == signalHeads[SIG_PNTS_UPPER] ))
-			occupancy |= OCC_VIRT_P_APPROACH;
-	
 		if ((ASPECT_FL_RED == signalHeads[SIG_PNTS_LOWER] || ASPECT_RED == signalHeads[SIG_PNTS_LOWER]) && (ASPECT_RED == signalHeads[SIG_PNTS_UPPER] || ASPECT_FL_RED == signalHeads[SIG_PNTS_UPPER]))
-			occupancy |= OCC_VIRT_P_ADJOIN;
+			occupancy[0] |= OCC_VIRT_P_ADJOIN | OCC_VIRT_P_APPROACH;
+		else if (ASPECT_YELLOW == signalHeads[SIG_PNTS_LOWER] || ASPECT_FL_YELLOW == signalHeads[SIG_PNTS_LOWER] || ASPECT_YELLOW == signalHeads[SIG_PNTS_UPPER] || ASPECT_FL_YELLOW == signalHeads[SIG_PNTS_UPPER])
+			occupancy[0] |= OCC_VIRT_P_APPROACH;
+	
 	} else {
-		// East Control Point improperly lined, trip virtual occupancy
-			occupancy |= OCC_VIRT_P_ADJOIN | OCC_VIRT_M_ADJOIN | OCC_VIRT_S_ADJOIN;
-	}
+		//  Control Point improperly lined, trip virtual occupancy
+		occupancy[0] |= OCC_VIRT_P_APPROACH | OCC_VIRT_P_ADJOIN | OCC_VIRT_MA_APPROACH | OCC_VIRT_MA_ADJOIN | OCC_VIRT_MB_APPROACH | OCC_VIRT_MB_ADJOIN;
+		occupancy[1] |= OCC_VIRT_MC_APPROACH | OCC_VIRT_MC_ADJOIN;
+	}*/
 
 }
 
-#define pointsUnlockedSwitch()  ((debounced_inputs[0] & PNTS_UNLOCK)?false:true)
+bool pointsUnlockedSwitch()
+{
+/*	bool timelockSwitchInverted = (OPTIONS_INVERT_TIMELOCK & eeprom_read_byte((uint8_t*)EE_OPTIONS));
+	bool retval = (debounced_inputs[0] & PNTS_UNLOCK)?false:true;
+	if (timelockSwitchInverted)
+		retval = !retval;
+	return retval;*/
+	return false;
+}
+
+// For the XIO pins, 0 is output, 1 is input
+const uint8_t const xio1PinDirection[5] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
 
 int main(void)
 {
-	uint8_t changed = 0;
-	uint8_t i;
-
+	CPState_t cpState;
+	XIOControl xio1;
 	// Application initialization
 	init();
+
+	CPInitialize(&cpState);
 
 	// Initialize a 100 Hz timer. 
 	initialize100HzTimer();
@@ -766,11 +441,12 @@ int main(void)
 	mrbusPktQueueInitialize(&mrbusRxQueue, mrbusRxPktBufferArray, rxBuffer_DEPTH);
 	mrbusInit();
 
-	sei();	
-	i2c_master_init();
-	xioInitialize();
+	sei();
 
-	CodeCTCRoute(CONTROLPOINT_1, POINTS_NORMAL_FORCE, CLEARANCE_NONE);
+	// Initialize I2C and XIOs for output - needs to have interrupts on for I2C to work
+	i2c_master_init();
+	xioHardwareReset();
+	xioInitialize(&xio1, I2C_XIO0_ADDRESS, xio1PinDirection);
 
 	while (1)
 	{
@@ -778,7 +454,7 @@ int main(void)
 
 		// Handle any packets that may have come in
 		if (mrbusPktQueueDepth(&mrbusRxQueue))
-			PktHandler();
+			PktHandler(&cpState);
 
 		// The EVENT_I2C_ERROR flag gets set if a read or write fails for some reason
 		// I'm going to assume it's because the I2C bus went heywire, and we need to do
@@ -787,97 +463,36 @@ int main(void)
 		if (events & EVENT_I2C_ERROR)
 		{
 			i2cResetCounter++;
-			xioInitialize();
+			xioHardwareReset();
+			xioInitialize(&xio1, I2C_XIO0_ADDRESS, xio1PinDirection);
+			if (xioIsInitialized(&xio1))
+				events &= ~(EVENT_I2C_ERROR); // If we initialized successfully, clear error
 		}
 
 		if(events & (EVENT_READ_INPUTS))
 		{
-			uint8_t delta;
-			xioInputRead();
-			for(i=0; i<2; i++)
-			{
-				// Vertical counter debounce courtesy 
-				delta = xio1Inputs[i] ^ debounced_inputs[i];
-				clock_a[i] ^= clock_b[i];
-				clock_b[i]  = ~(clock_b[i]);
-				clock_a[i] &= delta;
-				clock_b[i] &= delta;
-				debounced_inputs[i] ^= ~(~delta | clock_a[i] | clock_b[i]);
-			}
-
-			switch(turnoutState)
-			{
-				case STATE_LOCKED:
-					if (pointsUnlockedSwitch())
-					{
-						timeCounter = eeprom_read_byte((uint8_t*)EE_UNLOCK_TIME);
-						turnoutState = STATE_TIMERUN;
-						CodeCTCRoute(CONTROLPOINT_1, POINTS_UNAFFECTED, CLEARANCE_NONE);
-					} else {
-						xio1Outputs[3] &= ~(PNTS_TIMELOCK_LED);
-					}
-					break;
-					
-				case STATE_TIMERUN:
-					if (events & EVENT_BLINKY)
-						xio1Outputs[3] &= ~(PNTS_TIMELOCK_LED);
-					else
-						xio1Outputs[3] |= PNTS_TIMELOCK_LED;
-
-					if (!pointsUnlockedSwitch())
-						turnoutState = STATE_LOCKED;
-
-					if (0 == timeCounter)
-						turnoutState = STATE_UNLOCKED;
-					break;
-					
-				case STATE_UNLOCKED:
-					// FIXME: Set turnout position here
-					xio1Outputs[3] |= PNTS_TIMELOCK_LED;
-					if (xio1Inputs[1] & PNTS_LOCAL_DIR)
-						CodeCTCRoute(CONTROLPOINT_1, POINTS_NORMAL_FORCE, CLEARANCE_NONE);
-					else
-						CodeCTCRoute(CONTROLPOINT_1, POINTS_REVERSE_FORCE, CLEARANCE_NONE);
-
-					if (!pointsUnlockedSwitch())
-						turnoutState = STATE_RELOCKING;
-					break;
-
-				case STATE_RELOCKING:
-					if (xio1Inputs[1] & PNTS_LOCAL_DIR)
-						CodeCTCRoute(CONTROLPOINT_1, POINTS_NORMAL_FORCE, CLEARANCE_NONE);
-					else
-						CodeCTCRoute(CONTROLPOINT_1, POINTS_REVERSE_FORCE, CLEARANCE_NONE);
-
-					if (!pointsUnlockedSwitch() && !(turnouts & (PNTS_STATUS)))
-						turnoutState = STATE_LOCKED;
-
-					break;
-				
-				default: // No idea why we'd get here, but just in case...
-					turnoutState = STATE_RELOCKING;
-					break;
-			} 
-
-			turnouts &= ~(PNTS_STATUS);
-			turnouts |= debounced_inputs[0] & (PNTS_STATUS);
-
-			old_debounced_inputs[0] = debounced_inputs[0];
-			old_debounced_inputs[1] = debounced_inputs[1];
-
+			// Read local  and hardware inputs
 			events &= ~(EVENT_READ_INPUTS);
+			xioInputRead(&xio1);
 		}
 
 		// Vital Logic
-		vitalLogic();
+		vitalLogic(&cpState);
 
 		// Send output
 		if (events & EVENT_WRITE_OUTPUTS)
 		{
-			uint8_t comAnodeHeads = eeprom_read_byte((uint8_t*)EE_HEADS_COM_ANODE);
-			SignalsToOutputs(comAnodeHeads);
-			xioOutputWrite();
+			//uint8_t comAnodeHeads = eeprom_read_byte((uint8_t*)EE_HEADS_COM_ANODE);
+//			SignalsToOutputs(comAnodeHeads);
+			xioOutputWrite(&xio1);
 			events &= ~(EVENT_WRITE_OUTPUTS);
+		}
+	}
+/*
+		if (CPStateChange(cpOldState, cpState))
+		{
+			
+			
 		}
 
 		// Test if something changed from the last time
@@ -887,17 +502,20 @@ int main(void)
 		if (memcmp(signalHeads, old_signalHeads, sizeof(signalHeads))
 			|| old_turnouts != turnouts
 			|| old_clearance != clearance
-			|| old_occupancy != occupancy)
+			|| old_occupancy[0] != occupancy[0]
+			|| old_occupancy[1] != occupancy[1])
 		{
 			// Something Changed - time to update
 			for(i=0; i<sizeof(signalHeads); i++)
 				old_signalHeads[i] = signalHeads[i];
+			for(i=0; i<sizeof(ext_occupancy); i++)
+				old_ext_occupancy[i] = ext_occupancy[i];
+			for(i=0; i<sizeof(occupancy); i++)
+				old_occupancy[i] = occupancy[i];
 
 			old_turnouts = turnouts;
 			old_clearance = clearance;
-			old_occupancy = occupancy;
-			old_ext_occupancy = ext_occupancy;
-			old_ext_occupancy2 = ext_occupancy2;
+
 			// Set changed such that a packet gets sent
 			changed = 1;
 		}
@@ -914,90 +532,58 @@ int main(void)
 					decisecs = 0;
 			}
 		}
-		/* If we need to send a packet and we're not already busy... */
-
-/*
-Byte
-6 - East Frog Signals
- 4:7 - Siding Signal
- 0:3 - Main Signal
-7 - East Points Signal
- 4:7 - E Points Signal Upper
- 0:3 - E Points Signal Lower
-8 - West Frog Signals
- 4:7 - Siding Signal
- 0:3 - Main Signal
-9 - West Points Signal
- 4:7 - W Points Signal Upper
- 0:3 - W Points Signal Lower
-
-10 - Occupancy 1
- 7 - E Adjoining
- 6 - E Adjacent
- 5 - W Adjoining
- 4 - W Adjacent
- 3 - Main
- 2 - Siding
- 1 - East OS Section
- 0 - West OS Section
-
-11: East OS Status
- 7 - E OS Adjacent Virtual Occ
- 6 - E OS Virtual Occ
- 5 - E points lined Siding
- 4 - E points lined Mainline
- 3 - Undefined
- 2 - E OS not cleared
- 1 - E OS cleared Westbound
- 0 - E OS cleared Eastbound
-
-
- 
- */
-
-#define MRB_STATUS_CP_CLEARED_EAST   0x01
-#define MRB_STATUS_CP_CLEARED_WEST   0x02
-#define MRB_STATUS_CP_CLEARED_NONE   0x04
-#define MRB_STATUS_CP_MANUAL_UNLOCK  0x08
-#define MRB_STATUS_CP_SWITCH_NORMAL  0x10
-#define MRB_STATUS_CP_SWITCH_REVERSE 0x20
-#define MRB_STATUS_CP_VOCC_ADJOIN    0x40
-#define MRB_STATUS_CP_VOCC_APPROACH  0x80
+		// If we need to send a packet and we're not already busy...
+#define MRB_STATUS_CP_CLEARED_EAST      0x01
+#define MRB_STATUS_CP_CLEARED_WEST      0x02
+#define MRB_STATUS_CP_CLEARED_NONE      0x04
+#define MRB_STATUS_CP_MANUAL_UNLOCK     0x08
+#define MRB_STATUS_CP_SWITCH_EX_NORMAL  0x10
+#define MRB_STATUS_CP_SWITCH_EX_REVERSE 0x20
+#define MRB_STATUS_CP_SWITCH_WX_NORMAL  0x40
+#define MRB_STATUS_CP_SWITCH_WX_REVERSE 0x80
 
 		if (changed && !mrbusPktQueueFull(&mrbusTxQueue))
 		{
 			uint8_t txBuffer[MRBUS_BUFFER_SIZE];
 			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			txBuffer[MRBUS_PKT_DEST] = 0xFF;
-			txBuffer[MRBUS_PKT_LEN] = 11;
+			txBuffer[MRBUS_PKT_LEN] = 12;
 			txBuffer[5] = 'S';
-			txBuffer[6] = ((signalHeads[SIG_SIDING]<<4) & 0xF0) | (signalHeads[SIG_MAIN] & 0x0F);
-			txBuffer[7] = ((signalHeads[SIG_PNTS_UPPER]<<4) & 0xF0) | (signalHeads[SIG_PNTS_LOWER] & 0x0F);
-			txBuffer[8] = occupancy;
+			txBuffer[6] = ((signalHeads[SIG_MAIN_B]<<4) & 0xF0) | (signalHeads[SIG_MAIN_A] & 0x0F);
+			txBuffer[7] = (signalHeads[SIG_MAIN_C] & 0x0F) | ((occupancy[1]<<4) & 0xF0);
+			txBuffer[8] = ((signalHeads[SIG_PNTS_UPPER]<<4) & 0xF0) | (signalHeads[SIG_PNTS_LOWER] & 0x0F);
+			
+			txBuffer[9] = occupancy[0];
 			
 			switch(GetClearance(CONTROLPOINT_1))
 			{
 				case CLEARANCE_EAST:
-					txBuffer[9] = MRB_STATUS_CP_CLEARED_EAST;
+					txBuffer[10] = MRB_STATUS_CP_CLEARED_EAST;
 					break;
 				case CLEARANCE_WEST:
-					txBuffer[9] = MRB_STATUS_CP_CLEARED_WEST;
+					txBuffer[10] = MRB_STATUS_CP_CLEARED_WEST;
 					break;
 				case CLEARANCE_NONE:
 				default:
-					txBuffer[9] = MRB_STATUS_CP_CLEARED_NONE;
+					txBuffer[10] = MRB_STATUS_CP_CLEARED_NONE;
 					break;
 			}
 
 			if (STATE_LOCKED != turnoutState)
-				txBuffer[9] |= MRB_STATUS_CP_MANUAL_UNLOCK;
+				txBuffer[10] |= MRB_STATUS_CP_MANUAL_UNLOCK;
 
-			if (turnouts & PNTS_STATUS)  // Low is normal, high is reverse
-				txBuffer[9] |= MRB_STATUS_CP_SWITCH_REVERSE;
+			if (turnouts & PNTS_EX_STATUS)  // Low is normal, high is reverse
+				txBuffer[10] |= MRB_STATUS_CP_SWITCH_EX_REVERSE;
 			else
-				txBuffer[9] |= MRB_STATUS_CP_SWITCH_NORMAL;
+				txBuffer[10] |= MRB_STATUS_CP_SWITCH_EX_NORMAL;
 
-			txBuffer[10] = i2cResetCounter;
+			if (turnouts & PNTS_WX_STATUS)  // Low is normal, high is reverse
+				txBuffer[10] |= MRB_STATUS_CP_SWITCH_WX_REVERSE;
+			else
+				txBuffer[10] |= MRB_STATUS_CP_SWITCH_WX_NORMAL;
+
+
+			txBuffer[11] = i2cResetCounter;
 			mrbusPktQueuePush(&mrbusTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 			changed = 0;
 		}
@@ -1027,16 +613,15 @@ Byte
 						PktHandler();
 				}
 			}
-		}
-	}
+		}*/
 }
 
-void PktHandler(void)
+void PktHandler(CPState_t *cpState)
 {
 	uint16_t crc = 0;
 	uint8_t i;
-	uint8_t rxBuffer[MRBUS_BUFFER_SIZE];	
-	uint8_t txBuffer[MRBUS_BUFFER_SIZE];	
+	uint8_t rxBuffer[MRBUS_BUFFER_SIZE];
+	uint8_t txBuffer[MRBUS_BUFFER_SIZE];
 
 	if (0 == mrbusPktQueuePop(&mrbusRxQueue, rxBuffer, sizeof(rxBuffer)))
 		return;
@@ -1044,11 +629,11 @@ void PktHandler(void)
 	//*************** PACKET FILTER ***************
 	// Loopback Test - did we send it?  If so, we probably want to ignore it
 	if (rxBuffer[MRBUS_PKT_SRC] == mrbus_dev_addr) 
-		goto	PktIgnore;
+		goto PktIgnore;
 
 	// Destination Test - is this for us or broadcast?  If not, ignore
 	if (0xFF != rxBuffer[MRBUS_PKT_DEST] && mrbus_dev_addr != rxBuffer[MRBUS_PKT_DEST]) 
-		goto	PktIgnore;
+		goto PktIgnore;
 	
 	// CRC16 Test - is the packet intact?
 	for(i=0; i<rxBuffer[MRBUS_PKT_LEN]; i++)
@@ -1057,25 +642,14 @@ void PktHandler(void)
 			crc = mrbusCRC16Update(crc, rxBuffer[i]);
 	}
 	if ((UINT16_HIGH_BYTE(crc) != rxBuffer[MRBUS_PKT_CRC_H]) || (UINT16_LOW_BYTE(crc) != rxBuffer[MRBUS_PKT_CRC_L]))
-		goto	PktIgnore;
+		goto PktIgnore;
 		
 	//*************** END PACKET FILTER ***************
 
 
 	//*************** PACKET HANDLER - PROCESS HERE ***************
 
-	// Just smash the transmit buffer if we happen to see a packet directed to us
-	// that requires an immediate response
-	//
-	// If we're in here, then either we're transmitting, then we can't be 
-	// receiving from someone else, or we failed to transmit whatever we were sending
-	// and we're waiting to try again.  Either way, we're not going to corrupt an
-	// in-progress transmission.
-	//
-	// All other non-immediate transmissions (such as scheduled status updates)
-	// should be sent out of the main loop so that they don't step on things in
-	// the transmit buffer
-	
+	// **** Handle commands addressed to us
 	switch(rxBuffer[MRBUS_PKT_TYPE])
 	{
 		case 'A':
@@ -1089,17 +663,17 @@ void PktHandler(void)
 
 		case 'C':
 			// CTC Command
-			// The data elements are:
-			//  6 - Control point being manipulated
-			//  7 - Turnout normal/reverse
-			//  8 - Clear eastbound or westbound
-			if (CONTROLPOINT_1 == rxBuffer[6] && STATE_LOCKED == turnoutState)
-				CodeCTCRoute(CONTROLPOINT_1, rxBuffer[7], PktDirToClearance(rxBuffer[8]));
-			goto PktIgnore;
+			// Structure of command:
+			//  byte 6:
+			//    'G' - Set/Clear route from entrance signal (byte 7 signal number, byte 8 'S'/'C' for set/clear)
+			//    'T' - Set turnout (byte 7) normal or diverging ('M'/'D' - byte 8)
 
-		case 'T':
-			if (1 == rxBuffer[6] && STATE_LOCKED == turnoutState)
-				CodeCTCRoute(CONTROLPOINT_1, rxBuffer[6], CLEARANCE_NONE);
+/*			if (rxBuffer[MRBUS_PKT_LEN] >= 9 && 'G' == rxBuffer[6] && ('S' == rxBuffer[8] || 'C' == rxBuffer[8]))
+				CodeCTCRoute(rxBuffer[7], rxBuffer[8]);
+
+			if (rxBuffer[MRBUS_PKT_LEN] >= 9 && 'T' == rxBuffer[6] && ('S' == rxBuffer[8] || 'C' == rxBuffer[8]))
+				SetTurnout(rxBuffer[7], rxBuffer[8]);*/
+
 			goto PktIgnore;
 
 		case 'W':
@@ -1125,10 +699,10 @@ void PktHandler(void)
 			// EEPROM READ Packet
 			txBuffer[MRBUS_PKT_DEST] = rxBuffer[MRBUS_PKT_SRC];
 			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-			txBuffer[MRBUS_PKT_LEN] = 8;			
+			txBuffer[MRBUS_PKT_LEN] = 8;
 			txBuffer[MRBUS_PKT_TYPE] = 'r';
 			txBuffer[6] = rxBuffer[6];
-			txBuffer[7] = eeprom_read_byte((uint8_t*)(uint16_t)rxBuffer[6]);			
+			txBuffer[7] = eeprom_read_byte((uint8_t*)(uint16_t)rxBuffer[6]);
 			mrbusPktQueuePush(&mrbusTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 			goto PktIgnore;
 
@@ -1144,10 +718,10 @@ void PktHandler(void)
 			txBuffer[9]  = 0; // Software Revision
 			txBuffer[10]  = 0; // Hardware Major Revision
 			txBuffer[11]  = 0; // Hardware Minor Revision
-			txBuffer[12] = 'T';
-			txBuffer[13] = 'M';
-			txBuffer[14] = 'P';
-			txBuffer[15] = 'L';
+			txBuffer[12] = 'C';
+			txBuffer[13] = 'P';
+			txBuffer[14] = '3';
+			txBuffer[15] = ' ';
 			mrbusPktQueuePush(&mrbusTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 			goto PktIgnore;
 
@@ -1165,128 +739,8 @@ void PktHandler(void)
 
 
 	/*************** NOT A PACKET WE EXPLICITLY UNDERSTAND, TRY BIT/BYTE RULES ***************/
-	for (i=0; i<13; i++)
-	{
-		uint8_t byte, bitset=0;
-		uint8_t srcAddr = eeprom_read_byte((uint8_t*)(i+EE_P_APRCH_ADDR));
-		if (rxBuffer[MRBUS_PKT_SRC] != srcAddr || 0x00 == srcAddr)
-			continue;
+	CPMRBusVirtInputFilter(cpState, rxBuffer);
 
-		if (rxBuffer[MRBUS_PKT_TYPE] != eeprom_read_byte((uint8_t*)(i+EE_P_APRCH_PKT)))
-			continue;
-		
-		byte = eeprom_read_byte((uint8_t*)(i+EE_P_APRCH_SUBTYPE));
-		if ((0xFF != byte) && (rxBuffer[MRBUS_PKT_SUBTYPE] != byte))
-			continue;
-
-		/* BITBYTE is computed as follows:
-			x = bit = 0-7
-			y = byte = byte in data stream (6 is first data byte)
-			xxxyyyy
-		*/
-		byte = eeprom_read_byte((uint8_t*)(i+EE_P_APRCH_BITBYTE));
-		bitset = rxBuffer[(byte & 0x1F)] & (1<<((byte>>5) & 0x07));
-
-		switch(i + EE_P_APRCH_ADDR)
-		{
-			case EE_M_APRCH_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_M_APPROACH;
-				else
-					ext_occupancy &= ~(XOCC_M_APPROACH);
-				break;
-
-			case EE_M_APRCH2_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_M_APPROACH2;
-				else
-					ext_occupancy &= ~(XOCC_M_APPROACH2);
-				break;
-				
-			case EE_M_ADJ_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_M_ADJOIN;
-				else
-					ext_occupancy &= ~(XOCC_M_ADJOIN);
-				break;
-			
-			case EE_M_TUMBLE_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_M_TUMBLE;
-				else
-					ext_occupancy &= ~(XOCC_M_TUMBLE);
-				break;
-				
-				
-				
-			case EE_P_APRCH_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_P_APPROACH;
-				else
-					ext_occupancy &= ~(XOCC_P_APPROACH);
-				break;
-
-			case EE_P_APRCH2_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_P_APPROACH2;
-				else
-					ext_occupancy &= ~(XOCC_P_APPROACH2);
-				break;
-				
-			case EE_P_ADJ_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_P_ADJOIN;
-				else
-					ext_occupancy &= ~(XOCC_P_ADJOIN);
-				break;
-			
-			case EE_P_TUMBLE_ADDR:
-				if (bitset)
-					ext_occupancy |= XOCC_P_TUMBLE;
-				else
-					ext_occupancy &= ~(XOCC_P_TUMBLE);
-				break;
-
-
-			case EE_S_APRCH_ADDR:
-				if (bitset)
-					ext_occupancy2 |= XOCC2_S_APPROACH;
-				else
-					ext_occupancy2 &= ~(XOCC2_S_APPROACH);
-				break;
-
-			case EE_S_APRCH2_ADDR:
-				if (bitset)
-					ext_occupancy2 |= XOCC2_S_APPROACH2;
-				else
-					ext_occupancy2 &= ~(XOCC2_S_APPROACH2);
-				break;
-				
-			case EE_S_ADJ_ADDR:
-				if (bitset)
-					ext_occupancy2 |= XOCC2_S_ADJOIN;
-				else
-					ext_occupancy2 &= ~(XOCC2_S_ADJOIN);
-				break;
-			
-			case EE_S_TUMBLE_ADDR:
-				if (bitset)
-					ext_occupancy2 |= XOCC2_S_TUMBLE;
-				else
-					ext_occupancy2 &= ~(XOCC2_S_TUMBLE);
-				break;
-
-
-			case EE_OS_ADDR:
-				if (bitset)
-					occupancy |= OCC_OS_SECT;
-				else
-					occupancy &= ~(OCC_OS_SECT);
-				break;
-
-
-		}
-	}
 	//*************** END PACKET HANDLER  ***************
 
 	

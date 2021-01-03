@@ -44,8 +44,8 @@ PROGRAMMER_PORT=usb
 
 # MRBus
 DEFINES = -DMRBUS -D$(GITREV) -DI2C_FREQ=400000
-SRCS = mrb-xo2.c busvoltage.c $(MRBUS_DIRECTORY)/mrbus-avr.c $(MRBUS_DIRECTORY)/mrbus-crc.c $(MRBUS_DIRECTORY)/mrbus-queue.c $(I2CLIB_DIRECTORY)/avr-i2c-master.c
-INCS = $(MRBUS_DIRECTORY)/mrbus.h $(MRBUS_DIRECTORY)/mrbus-avr.h $(I2CLIB_DIRECTORY)/avr-i2c-master.h
+SRCS = mrb-xo2.c busvoltage.c xio-driver.c controlpoint.c $(MRBUS_DIRECTORY)/mrbus-avr.c $(MRBUS_DIRECTORY)/mrbus-crc.c $(MRBUS_DIRECTORY)/mrbus-queue.c $(I2CLIB_DIRECTORY)/avr-i2c-master.c
+INCS = $(MRBUS_DIRECTORY)/mrbus.h $(MRBUS_DIRECTORY)/mrbus-avr.h $(I2CLIB_DIRECTORY)/avr-i2c-master.h controlpoint.h config-signals.h config-eeprom.h config-inputs.h xio-driver.h aspects.h 
 
 AVRDUDE = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B1 -F
 AVRDUDE_SLOW = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B32 -F
