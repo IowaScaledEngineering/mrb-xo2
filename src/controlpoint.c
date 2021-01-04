@@ -48,12 +48,12 @@ void CPMRBusVirtInputFilter(CPState_t* state, const uint8_t const *mrbRxBuffer)
 
 void CPXIOInputFilter(CPState_t* state, XIOControl* xio)
 {
-	for (uint8_t i=0; i<sizeof(state->inputs) / sizeof(CPInput_t); i++)
+	for (uint8_t i=0; i<VINPUT_END; i++)
 	{
 		if (state->inputs[i].isVirtual)
 			continue;
 
-		state->inputs[i].isSet = xioGetDebouncedIObyPortBit(&xio[state->inputs[i].pktSrc],state->inputs[i].pktType, state->inputs[i].pktBitByte);
+		state->inputs[i].isSet = xioGetDebouncedIObyPortBit(&xio[state->inputs[i].pktSrc], state->inputs[i].pktType, state->inputs[i].pktBitByte);
 	}
 }
 
@@ -92,7 +92,7 @@ void CPInitializeSignalHead(SignalHeadAspect_t *sig)
 
 bool CPInputStateGet(CPState_t* state, CPInputNames_t inputID)
 {
-	if (inputID < sizeof(state->inputs) / sizeof(CPInput_t))
+	if (inputID < VINPUT_END)
 		return state->inputs[inputID].isSet;
 
 	return false;
@@ -100,7 +100,7 @@ bool CPInputStateGet(CPState_t* state, CPInputNames_t inputID)
 
 bool CPInputStateSet(CPState_t* state, CPInputNames_t inputID, bool isSet)
 {
-	if (inputID < sizeof(state->inputs) / sizeof(CPInput_t))
+	if (inputID < VINPUT_END)
 	{
 		state->inputs[inputID].isSet = isSet;
 		return true;
@@ -240,7 +240,7 @@ void CPInitializeInput(CPInput_t *input)
 	input->pktType = 0x00;
 	input->pktBitByte = 0x00;
 
-	for (i=0; !input->isVirtual && i<sizeof(vInputConfigArray); i+=vInputConfigRecSize)
+	for (i=0; i<sizeof(vInputConfigArray); i+=vInputConfigRecSize)
 	{
 		memcpy_P(vInputConfigRec, &vInputConfigArray[i], vInputConfigRecSize);
 		if (vInputConfigRec[0] == input->inputID)
@@ -256,11 +256,11 @@ void CPInitializeInput(CPInput_t *input)
 	for (i=0; i<sizeof(xioInputConfigArray); i+=xioInputConfigRecSize)
 	{
 		memcpy_P(xioInputConfigRec, &xioInputConfigArray[i], xioInputConfigRecSize);
-		if (vInputConfigRec[0] == input->inputID)
+		if (xioInputConfigRec[0] == input->inputID)
 		{
-			input->pktSrc = vInputConfigRec[1];
-			input->pktType = vInputConfigRec[2];
-			input->pktBitByte = vInputConfigRec[3];
+			input->pktSrc = xioInputConfigRec[1];
+			input->pktType = xioInputConfigRec[2];
+			input->pktBitByte = xioInputConfigRec[3];
 			return;
 		}
 	}
@@ -285,7 +285,7 @@ void CPInitialize(CPState_t* state)
 	for (i=0; i<sizeof(state->turnouts) / sizeof(CPTurnout_t); i++)
 		CPInitializeTurnout(&state->turnouts[i]);
 
-	for (i=0; i<sizeof(state->inputs) / sizeof(CPInput_t); i++)
+	for (i=0; i<VINPUT_END; i++)
 	{
 		state->inputs[i].inputID = (CPInputNames_t)i;
 		CPInitializeInput(&state->inputs[i]);

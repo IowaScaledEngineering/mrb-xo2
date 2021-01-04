@@ -36,7 +36,7 @@ typedef struct
 
 const TurnoutPinDefinition const cpTurnoutPinDefs[TURNOUT_END] = 
 {
-	{TURNOUT_E_XOVER, 0, XIO_PORT_D, 2, false},
+	{TURNOUT_E_XOVER, 0, XIO_PORT_D, 2, true},
 	{TURNOUT_W_XOVER, 0, XIO_PORT_D, 3, false}
 };
 

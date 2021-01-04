@@ -46,6 +46,7 @@ volatile uint8_t events = 0;
 
 #define EVENT_READ_INPUTS    0x01
 #define EVENT_WRITE_OUTPUTS  0x02
+#define EVENT_1HZ            0x04
 #define EVENT_I2C_ERROR      0x40
 #define EVENT_BLINKY         0x80
 
@@ -117,6 +118,8 @@ ISR(TIMER0_COMPA_vect)
 		{
 			events ^= EVENT_BLINKY;
 			blinkyCounter = 0;
+			if (0 == (events & EVENT_BLINKY))
+				events |= EVENT_1HZ;
 		}
 
 		if (buttonLockout != 0)
@@ -422,7 +425,7 @@ bool pointsUnlockedSwitch()
 }
 
 // For the XIO pins, 0 is output, 1 is input
-const uint8_t const xio1PinDirection[5] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
+const uint8_t const xio1PinDirection[5] = { 0x00, 0x00, 0x00, 0xF2, 0x00 };
 
 void setTimelockLED(XIOControl* xio, bool state)
 {
@@ -440,7 +443,7 @@ bool getTimelockSwitchState(XIOControl* xio)
 void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
 {
 	// First, deal with the timelock
-	bool manualUnlockSwitchOn = getTimelockSwitchState(xio);
+	bool manualUnlockSwitchOn = !CPInputStateGet(state, TIMELOCK_SW_POS);//getTimelockSwitchState(xio);
 	
 	switch(CPTimelockStateGet(state, MAIN_TIMELOCK))
 	{
@@ -550,6 +553,12 @@ int main(void)
 				events &= ~(EVENT_I2C_ERROR); // If we initialized successfully, clear error
 		}
 
+		if (events & EVENT_1HZ)
+		{
+			events &= ~(EVENT_1HZ);
+			CPTimelockApply1HzTick(&cpState);
+		}
+
 		if(events & (EVENT_READ_INPUTS))
 		{
 			// Read local  and hardware inputs
@@ -559,6 +568,7 @@ int main(void)
 		}
 
 		// Vital Logic
+		cpHandleTurnouts(&cpState, &xio1);
 		vitalLogic(&cpState);
 
 		// Send output

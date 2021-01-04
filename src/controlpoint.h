@@ -101,5 +101,6 @@ SignalHeadAspect_t CPSignalHeadGetAspect(CPState_t *cpState, CPSignalHeadNames_t
 
 // Control point to physical hardware functions
 void CPSignalsToOutputs(CPState_t *cpState, XIOControl* xio, bool blinkerOn);
+void CPTurnoutsToOutputs(CPState_t *cpState, XIOControl* xio);
 
 #endif
