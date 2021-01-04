@@ -39,8 +39,15 @@ typedef enum
 	STATE_LOCKED = 0,
 	STATE_TIMERUN = 1,
 	STATE_UNLOCKED = 2,
-	STATE_RELOCKING = 3
-} CPTurnoutState_t;
+	STATE_RELOCKING = 3,
+	STATE_UNKNOWN   = 100
+} CPTimelockState_t;
+
+typedef struct
+{
+	CPTimelockState_t state;
+	uint8_t secs;
+} CPTimelock_t;
 
 typedef struct
 {
@@ -48,7 +55,6 @@ typedef struct
 	bool isRequestedNormal;
 	bool isLocked;
 	bool isManual;
-	CPTurnoutState_t turnoutState;
 } CPTurnout_t;
 
 typedef struct
@@ -67,16 +73,30 @@ typedef struct
 	SignalHeadAspect_t signalHeads[SIG_END];
 	CPTurnout_t turnouts[TURNOUT_END];
 	CPInput_t inputs[VINPUT_END];
+	CPTimelock_t timelocks[TIMELOCK_END];
 } CPState_t;
 
 void CPInitialize(CPState_t* state);
-void CPInitializeTurnout(CPTurnout_t *turnout);
 void CPInitializeSignalHead(SignalHeadAspect_t *sig);
 bool CPInputStateGet(CPState_t* state, CPInputNames_t inputID);
 bool CPInputStateSet(CPState_t* state, CPInputNames_t inputID, bool isSet);
 void CPSignalHeadSetAspect(CPState_t *cpState, CPSignalHeadNames_t signalID, SignalHeadAspect_t aspect);
 void CPSignalHeadAllSetAspect(CPState_t *cpState, SignalHeadAspect_t aspect);
 void CPMRBusVirtInputFilter(CPState_t* state, const uint8_t const *mrbRxBuffer);
+void CPXIOInputFilter(CPState_t* state, XIOControl* xio);
+
+// Turnout Functions
+void CPInitializeTurnout(CPTurnout_t *turnout);
+void CPTurnoutRequestedDirectionSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setNormal);
+void CPTurnoutManualOperationsSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setManual);
+
+
+void CPTimelockStateSet(CPState_t *cpState, CPTimelockNames_t timelockID, CPTimelockState_t state);
+void CPTimelockTimeSet(CPState_t *cpState, CPTimelockNames_t timelockID, uint8_t seconds);
+uint8_t CPTimelockTimeGet(CPState_t *cpState, CPTimelockNames_t timelockID);
+CPTimelockState_t CPTimelockStateGet(CPState_t *cpState, CPTimelockNames_t timelockID);
+void CPTimelockApply1HzTick(CPState_t* state);
+
 SignalHeadAspect_t CPSignalHeadGetAspect(CPState_t *cpState, CPSignalHeadNames_t signalID);
 
 // Control point to physical hardware functions

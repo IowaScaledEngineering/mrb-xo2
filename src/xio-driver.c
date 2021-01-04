@@ -38,6 +38,30 @@ LICENSE:
 #define DDR(port)  DDR_(port)
 #define PIN(port)  PIN_(port)
 
+
+void initDebounceState(XIODebounceState* d, uint8_t initialState)
+{
+	d->clock_A = d->clock_B = 0;
+	d->debounced_state = initialState;
+}
+
+uint8_t debounce(XIODebounceState* d, uint8_t raw_inputs)
+{
+	uint8_t delta = raw_inputs ^ d->debounced_state;   //Find all of the changes
+	uint8_t changes;
+
+	d->clock_A ^= d->clock_B;                     //Increment the counters
+	d->clock_B  = ~d->clock_B;
+
+	d->clock_A &= delta;                       //Reset the counters if no changes
+	d->clock_B &= delta;                       //were detected.
+
+	changes = ~((~delta) | d->clock_A | d->clock_B);
+	d->debounced_state ^= changes;
+	return(changes & ~(d->debounced_state));
+}
+
+
 void xioDirectionSend(XIOControl* xio)
 {
 	uint8_t i2cBuf[8], i;
@@ -76,15 +100,19 @@ void xioInitialize(XIOControl* xio, uint8_t xioAddress, const uint8_t* xioPinDir
 	xio->status |= XIO_I2C_ERROR;
 
 	for(i=0; i<5; i++)
+	{
 		xio->direction[i] = xioPinDirections[i];
-
+		initDebounceState(&xio->debounced_in[i], 0);
+	}
 	xioDirectionSend(xio);
-	
+
 	if (i2c_transaction_successful())
 	{
 		xio->status &= ~(XIO_I2C_ERROR);
 		xio->status |= XIO_INITIALIZED;
 	}
+	
+	
 }
 
 void xioOutputWrite(XIOControl* xio)
@@ -145,6 +173,20 @@ bool xioGetDeferredIO(XIOControl* xio, uint8_t ioNum)
 	return ((xio->io[ioNum/8] & (1<<(ioNum % 8)))?true:false);
 }
 
+bool xioGetDebouncedIO(XIOControl* xio, uint8_t ioNum)
+{
+	if (ioNum >= 40)
+		return(0);
+	
+	return ((xio->debounced_in[ioNum/8].debounced_state & (1<<(ioNum % 8)))?true:false);
+}
+
+bool xioGetDebouncedIObyPortBit(XIOControl* xio, uint8_t port, uint8_t bit)
+{
+	uint8_t ioNum = port * 8 + bit;
+	return xioGetDebouncedIO(xio, ioNum);
+}
+
 bool xioGetIO(XIOControl* xio, uint8_t ioNum)
 {
 	xioInputRead(xio);
@@ -179,6 +221,7 @@ void xioInputRead(XIOControl *xio)
 		uint8_t i;
 		for(i=0; i<5; i++)
 		{
+			debounce(&xio->debounced_in[i], (xio->direction[i] & i2cBuf[1+i]));
 			// Clear all things marked as inputs, leave outputs alone
 			xio->io[i] &= ~xio->direction[i];
 			// Only set anything that's high and marked as an input

@@ -25,6 +25,33 @@ LICENSE:
 #include "config-signals.h"
 #include "config-inputs.h"
 
+typedef struct
+{
+	const CPTurnoutNames_t turnoutID;
+	const unsigned int xioNum : 3;
+	const unsigned int controlByte : 3;
+	const unsigned int controlBit : 3;
+	bool isNormalLow;  // Means the turnout is normal/main when control is low
+} TurnoutPinDefinition;
+
+const TurnoutPinDefinition const cpTurnoutPinDefs[TURNOUT_END] = 
+{
+	{TURNOUT_E_XOVER, 0, XIO_PORT_D, 2, false},
+	{TURNOUT_W_XOVER, 0, XIO_PORT_D, 3, false}
+};
+
+typedef struct
+{
+	const CPSignalHeadNames_t signalHead;
+	const unsigned int xioNum : 3;
+	const unsigned int redByte : 3;
+	const unsigned int redBit : 3;
+	const unsigned int yellowByte : 3;
+	const unsigned int yellowBit : 3;
+	const unsigned int greenByte : 3;
+	const unsigned int greenBit : 3;
+	bool isCommonAnode;  // Common anode means output low to turn a signal on
+} SignalPinDefinition;
 
 const SignalPinDefinition const cpSignalPinDefs[SIG_END] = 
 {
@@ -70,6 +97,23 @@ const uint8_t vInputConfigArray[] PROGMEM =
 	
 	VOCC_M1_OS,          EE_M1_OS_ADDR,          EE_M1_OS_PKT,         EE_M1_OS_BITBYTE,
 	VOCC_M2_OS,          EE_M2_OS_ADDR,          EE_M2_OS_PKT,         EE_M2_OS_BITBYTE
+};
+
+const uint8_t xioInputConfigArray[] PROGMEM = 
+{
+/* These go in 4-byte increments - vinput ID, srcAddr, pktType, bitbyte
+ *  Virtual Input ID (from CPInputNames_t)
+ *  |                    XIO #
+ *  |                    |    XIO Port (A-E)
+ *  |                    |    |            XIO Port Pin
+ *  |                    |    |            |
+ *  v                    v    v            v
+*/
+	E_XOVER_ACTUAL_POS,  0,   XIO_PORT_D,  6,
+	W_XOVER_ACTUAL_POS,  0,   XIO_PORT_D,  7,
+	E_XOVER_MANUAL_POS,  0,   XIO_PORT_D,  4,
+	W_XOVER_MANUAL_POS,  0,   XIO_PORT_D,  5,
+	TIMELOCK_SW_POS,     0,   XIO_PORT_D,  1
 };
 
 #endif

@@ -50,9 +50,17 @@ LICENSE:
 
 typedef struct
 {
+	uint8_t clock_A;
+	uint8_t clock_B;
+	uint8_t debounced_state;
+} XIODebounceState;
+
+typedef struct
+{
 	uint8_t address;
 	uint8_t direction[5];
 	uint8_t io[5];
+	XIODebounceState debounced_in[5];
 	uint8_t status;
 } XIOControl;
 
@@ -65,7 +73,12 @@ typedef struct
 
 void xioInputRead(XIOControl *xio);
 bool xioGetIO(XIOControl* xio, uint8_t ioNum);
+bool xioGetDeferredIO(XIOControl* xio, uint8_t ioNum);
+bool xioGetDebouncedIO(XIOControl* xio, uint8_t ioNum);
+bool xioGetDebouncedIObyPortBit(XIOControl* xio, uint8_t port, uint8_t bit);
+
 void xioSetIO(XIOControl* xio, uint8_t ioNum, bool state);
+void xioSetDeferredIO(XIOControl* xio, uint8_t ioNum, bool state);
 void xioSetDeferredIObyPortBit(XIOControl* xio, uint8_t port, uint8_t bit, bool state);
 void xioOutputWrite(XIOControl* xio);
 void xioInitialize(XIOControl* xio, uint8_t xioAddress, const uint8_t* xioPinDirections);

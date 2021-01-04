@@ -38,17 +38,6 @@ typedef enum
 	SIG_END  // Must be last entry
 } CPSignalHeadNames_t;
 
-typedef struct
-{
-	const CPSignalHeadNames_t signalHead;
-	const unsigned int xioNum : 3;
-	const unsigned int redByte : 3;
-	const unsigned int redBit : 3;
-	const unsigned int yellowByte : 3;
-	const unsigned int yellowBit : 3;
-	const unsigned int greenByte : 3;
-	const unsigned int greenBit : 3;
-	bool isCommonAnode;  // Common anode means output low to turn a signal on
-} SignalPinDefinition;
+
 
 #endif

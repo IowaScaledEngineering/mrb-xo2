@@ -52,11 +52,15 @@ typedef enum
 	VOCC_M2_OS,
 	OCC_M1_OS,
 	OCC_M2_OS,
+	E_XOVER_ACTUAL_POS,
+	W_XOVER_ACTUAL_POS,
+	E_XOVER_MANUAL_POS,
+	W_XOVER_MANUAL_POS,
+	TIMELOCK_SW_POS,
 	VINPUT_END  // Must be last entry
 } CPInputNames_t;
 
-#define vInputConfigRecSize  4
-
-
+#define vInputConfigRecSize     4
+#define xioInputConfigRecSize   4
 
 #endif

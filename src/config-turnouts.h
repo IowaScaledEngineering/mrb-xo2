@@ -30,4 +30,10 @@ typedef enum
 	TURNOUT_END  // Must be last entry
 } CPTurnoutNames_t;
 
+typedef enum
+{
+	MAIN_TIMELOCK,
+	TIMELOCK_END  // Must be last entry
+} CPTimelockNames_t;
+
 #endif

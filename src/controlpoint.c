@@ -46,6 +46,17 @@ void CPMRBusVirtInputFilter(CPState_t* state, const uint8_t const *mrbRxBuffer)
 	}
 }
 
+void CPXIOInputFilter(CPState_t* state, XIOControl* xio)
+{
+	for (uint8_t i=0; i<sizeof(state->inputs) / sizeof(CPInput_t); i++)
+	{
+		if (state->inputs[i].isVirtual)
+			continue;
+
+		state->inputs[i].isSet = xioGetDebouncedIObyPortBit(&xio[state->inputs[i].pktSrc],state->inputs[i].pktType, state->inputs[i].pktBitByte);
+	}
+}
+
 void CPInitializeTurnout(CPTurnout_t *turnout)
 {
 	turnout->isNormal = true;
@@ -53,6 +64,26 @@ void CPInitializeTurnout(CPTurnout_t *turnout)
 	turnout->isLocked = false;
 	turnout->isManual = false;
 }
+
+void CPInitializeTimelock(CPTimelock_t *timelock)
+{
+	timelock->state = STATE_LOCKED;
+	timelock->secs = 0;
+}
+
+void CPTurnoutRequestedDirectionSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setNormal)
+{
+	if(turnoutID < TURNOUT_END)
+		state->turnouts[turnoutID].isRequestedNormal = setNormal;
+}
+
+void CPTurnoutManualOperationsSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setManual)
+{
+	if(turnoutID < TURNOUT_END)
+		state->turnouts[turnoutID].isManual = setManual;
+}
+
+
 
 void CPInitializeSignalHead(SignalHeadAspect_t *sig)
 {
@@ -74,7 +105,6 @@ bool CPInputStateSet(CPState_t* state, CPInputNames_t inputID, bool isSet)
 		state->inputs[inputID].isSet = isSet;
 		return true;
 	}
-
 	return false;
 }
 
@@ -93,6 +123,52 @@ void CPSignalHeadAllSetAspect(CPState_t *cpState, SignalHeadAspect_t aspect)
 SignalHeadAspect_t CPSignalHeadGetAspect(CPState_t *cpState, CPSignalHeadNames_t signalID)
 {
 	return cpState->signalHeads[signalID];
+}
+
+
+CPTimelockState_t CPTimelockStateGet(CPState_t *cpState, CPTimelockNames_t timelockID)
+{
+	if(timelockID < TIMELOCK_END)
+		return cpState->timelocks[timelockID].state;
+	return STATE_UNKNOWN;
+}
+
+void CPTimelockStateSet(CPState_t *cpState, CPTimelockNames_t timelockID, CPTimelockState_t state)
+{
+	if(timelockID < TIMELOCK_END)
+		cpState->timelocks[timelockID].state = state;
+}
+
+void CPTimelockTimeSet(CPState_t *cpState, CPTimelockNames_t timelockID, uint8_t seconds)
+{
+	if(timelockID < TIMELOCK_END)
+		cpState->timelocks[timelockID].secs = seconds;
+}
+
+uint8_t CPTimelockTimeGet(CPState_t *cpState, CPTimelockNames_t timelockID)
+{
+	if(timelockID < TIMELOCK_END)
+		return cpState->timelocks[timelockID].secs;
+	return 0;
+}
+
+void CPTurnoutsToOutputs(CPState_t *cpState, XIOControl* xio)
+{
+	for (uint8_t tid=0; tid<TURNOUT_END; tid++)
+	{
+		for (uint8_t j=0; j<sizeof(cpTurnoutPinDefs)/sizeof(TurnoutPinDefinition); j++)
+		{
+			if(cpTurnoutPinDefs[j].turnoutID == tid)
+			{
+				bool isRequestedNormal = cpState->turnouts[tid].isRequestedNormal;
+				
+				xioSetDeferredIObyPortBit(&xio[cpTurnoutPinDefs[j].xioNum], 
+					cpTurnoutPinDefs[j].controlByte, cpTurnoutPinDefs[j].controlBit,
+					(cpTurnoutPinDefs[j].isNormalLow)?!isRequestedNormal:isRequestedNormal);
+				break; // process next turnout
+			}
+		}
+	}
 }
 
 
@@ -157,7 +233,7 @@ void CPInitializeInput(CPInput_t *input)
 {
 	uint16_t i;
 	uint8_t vInputConfigRec[vInputConfigRecSize];
-
+	uint8_t xioInputConfigRec[xioInputConfigRecSize];
 	input->isVirtual = false;
 	input->isSet = false;
 	input->pktSrc = 0x00;
@@ -173,8 +249,29 @@ void CPInitializeInput(CPInput_t *input)
 			input->pktSrc = vInputConfigRec[1];
 			input->pktType = vInputConfigRec[2];
 			input->pktBitByte = vInputConfigRec[3];
-			break;
+			return;
 		}
+	}
+	
+	for (i=0; i<sizeof(xioInputConfigArray); i+=xioInputConfigRecSize)
+	{
+		memcpy_P(xioInputConfigRec, &xioInputConfigArray[i], xioInputConfigRecSize);
+		if (vInputConfigRec[0] == input->inputID)
+		{
+			input->pktSrc = vInputConfigRec[1];
+			input->pktType = vInputConfigRec[2];
+			input->pktBitByte = vInputConfigRec[3];
+			return;
+		}
+	}
+}
+
+void CPTimelockApply1HzTick(CPState_t* state)
+{
+	for (uint8_t i=0; i<sizeof(state->timelocks) / sizeof(CPTimelockState_t); i++)
+	{
+		if (state->timelocks[i].secs > 0)
+			state->timelocks[i].secs--;
 	}
 }
 
@@ -194,6 +291,8 @@ void CPInitialize(CPState_t* state)
 		CPInitializeInput(&state->inputs[i]);
 	}
 
+	for (i=0; i<sizeof(state->timelocks) / sizeof(CPTimelock_t); i++)
+		CPInitializeTimelock(&state->timelocks[i]);
 }
 
 

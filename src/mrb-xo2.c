@@ -424,6 +424,87 @@ bool pointsUnlockedSwitch()
 // For the XIO pins, 0 is output, 1 is input
 const uint8_t const xio1PinDirection[5] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
 
+void setTimelockLED(XIOControl* xio, bool state)
+{
+	xioSetDeferredIObyPortBit(xio, XIO_PORT_D, 0, state);
+}
+
+// Returns true if the timelock switch is unlocked (manual control)
+bool getTimelockSwitchState(XIOControl* xio)
+{
+	return xioGetDebouncedIObyPortBit(xio, XIO_PORT_D, 1);
+}
+
+
+
+void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
+{
+	// First, deal with the timelock
+	bool manualUnlockSwitchOn = getTimelockSwitchState(xio);
+	
+	switch(CPTimelockStateGet(state, MAIN_TIMELOCK))
+	{
+		case STATE_LOCKED:
+			if (manualUnlockSwitchOn)
+			{
+				CPTimelockTimeSet(state, MAIN_TIMELOCK, eeprom_read_byte((uint8_t*)EE_UNLOCK_TIME)/10);
+				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_TIMERUN);
+				setTimelockLED(xio, events & EVENT_BLINKY);
+				// FIXME: Drop Clearance
+			} else {
+				setTimelockLED(xio, false);
+				CPTurnoutManualOperationsSet(state, TURNOUT_E_XOVER, false);
+				CPTurnoutManualOperationsSet(state, TURNOUT_W_XOVER, false);
+			}
+			break;
+
+		case STATE_TIMERUN:
+			
+			if (!manualUnlockSwitchOn)
+				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_LOCKED);
+			else if (0 == CPTimelockTimeGet(state, MAIN_TIMELOCK))
+				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_UNLOCKED);
+			else
+			{
+				CPTurnoutManualOperationsSet(state, TURNOUT_E_XOVER, true);
+				CPTurnoutManualOperationsSet(state, TURNOUT_W_XOVER, true);
+				setTimelockLED(xio, events & EVENT_BLINKY);
+			}
+			break;
+					
+		case STATE_UNLOCKED:
+			setTimelockLED(xio, true);
+			// Set requested directions here based on manual inputs
+			if (!manualUnlockSwitchOn)
+				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_RELOCKING);
+			else
+			{
+				CPTurnoutManualOperationsSet(state, TURNOUT_E_XOVER, true);
+				CPTurnoutManualOperationsSet(state, TURNOUT_W_XOVER, true);
+
+				bool reqPos = CPInputStateGet(state, E_XOVER_MANUAL_POS);
+				CPTurnoutRequestedDirectionSet(state, TURNOUT_E_XOVER, reqPos);
+				
+				reqPos = CPInputStateGet(state, W_XOVER_MANUAL_POS);
+				CPTurnoutRequestedDirectionSet(state, TURNOUT_W_XOVER, reqPos);
+			}
+
+			break;
+
+		case STATE_RELOCKING:
+			// Put anything here that needs to be true before the CP can relock, such as 
+			// required switch positions
+			if (!manualUnlockSwitchOn)
+				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_LOCKED);
+			break;
+				
+		default: // No idea why we'd get here, but just in case...
+			CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_RELOCKING);
+			break;
+	} 
+}
+
+
 int main(void)
 {
 	CPState_t cpState;
@@ -474,6 +555,7 @@ int main(void)
 			// Read local  and hardware inputs
 			events &= ~(EVENT_READ_INPUTS);
 			xioInputRead(&xio1);
+			CPXIOInputFilter(&cpState, &xio1);
 		}
 
 		// Vital Logic
@@ -482,138 +564,12 @@ int main(void)
 		// Send output
 		if (events & EVENT_WRITE_OUTPUTS)
 		{
-			//uint8_t comAnodeHeads = eeprom_read_byte((uint8_t*)EE_HEADS_COM_ANODE);
-//			SignalsToOutputs(comAnodeHeads);
+			CPSignalsToOutputs(&cpState, &xio1, events & EVENT_BLINKY);
+			CPTurnoutsToOutputs(&cpState, &xio1);
 			xioOutputWrite(&xio1);
 			events &= ~(EVENT_WRITE_OUTPUTS);
 		}
 	}
-/*
-		if (CPStateChange(cpOldState, cpState))
-		{
-			
-			
-		}
-
-		// Test if something changed from the last time
-		// around the loop - we need to send an update 
-		//   packet if it did 
-	
-		if (memcmp(signalHeads, old_signalHeads, sizeof(signalHeads))
-			|| old_turnouts != turnouts
-			|| old_clearance != clearance
-			|| old_occupancy[0] != occupancy[0]
-			|| old_occupancy[1] != occupancy[1])
-		{
-			// Something Changed - time to update
-			for(i=0; i<sizeof(signalHeads); i++)
-				old_signalHeads[i] = signalHeads[i];
-			for(i=0; i<sizeof(ext_occupancy); i++)
-				old_ext_occupancy[i] = ext_occupancy[i];
-			for(i=0; i<sizeof(occupancy); i++)
-				old_occupancy[i] = occupancy[i];
-
-			old_turnouts = turnouts;
-			old_clearance = clearance;
-
-			// Set changed such that a packet gets sent
-			changed = 1;
-		}
-		else if (decisecs >= update_decisecs)
-			changed = 1;
-
-		if (changed)
-		{
-			ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-			{
-				if (decisecs > update_decisecs)
-					decisecs -= update_decisecs;
-				else
-					decisecs = 0;
-			}
-		}
-		// If we need to send a packet and we're not already busy...
-#define MRB_STATUS_CP_CLEARED_EAST      0x01
-#define MRB_STATUS_CP_CLEARED_WEST      0x02
-#define MRB_STATUS_CP_CLEARED_NONE      0x04
-#define MRB_STATUS_CP_MANUAL_UNLOCK     0x08
-#define MRB_STATUS_CP_SWITCH_EX_NORMAL  0x10
-#define MRB_STATUS_CP_SWITCH_EX_REVERSE 0x20
-#define MRB_STATUS_CP_SWITCH_WX_NORMAL  0x40
-#define MRB_STATUS_CP_SWITCH_WX_REVERSE 0x80
-
-		if (changed && !mrbusPktQueueFull(&mrbusTxQueue))
-		{
-			uint8_t txBuffer[MRBUS_BUFFER_SIZE];
-			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-			txBuffer[MRBUS_PKT_DEST] = 0xFF;
-			txBuffer[MRBUS_PKT_LEN] = 12;
-			txBuffer[5] = 'S';
-			txBuffer[6] = ((signalHeads[SIG_MAIN_B]<<4) & 0xF0) | (signalHeads[SIG_MAIN_A] & 0x0F);
-			txBuffer[7] = (signalHeads[SIG_MAIN_C] & 0x0F) | ((occupancy[1]<<4) & 0xF0);
-			txBuffer[8] = ((signalHeads[SIG_PNTS_UPPER]<<4) & 0xF0) | (signalHeads[SIG_PNTS_LOWER] & 0x0F);
-			
-			txBuffer[9] = occupancy[0];
-			
-			switch(GetClearance(CONTROLPOINT_1))
-			{
-				case CLEARANCE_EAST:
-					txBuffer[10] = MRB_STATUS_CP_CLEARED_EAST;
-					break;
-				case CLEARANCE_WEST:
-					txBuffer[10] = MRB_STATUS_CP_CLEARED_WEST;
-					break;
-				case CLEARANCE_NONE:
-				default:
-					txBuffer[10] = MRB_STATUS_CP_CLEARED_NONE;
-					break;
-			}
-
-			if (STATE_LOCKED != turnoutState)
-				txBuffer[10] |= MRB_STATUS_CP_MANUAL_UNLOCK;
-
-			if (turnouts & PNTS_EX_STATUS)  // Low is normal, high is reverse
-				txBuffer[10] |= MRB_STATUS_CP_SWITCH_EX_REVERSE;
-			else
-				txBuffer[10] |= MRB_STATUS_CP_SWITCH_EX_NORMAL;
-
-			if (turnouts & PNTS_WX_STATUS)  // Low is normal, high is reverse
-				txBuffer[10] |= MRB_STATUS_CP_SWITCH_WX_REVERSE;
-			else
-				txBuffer[10] |= MRB_STATUS_CP_SWITCH_WX_NORMAL;
-
-
-			txBuffer[11] = i2cResetCounter;
-			mrbusPktQueuePush(&mrbusTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
-			changed = 0;
-		}
-
-		// If we have a packet to be transmitted, try to send it here
-		if (mrbusPktQueueDepth(&mrbusTxQueue))
-		{
-			uint8_t fail = mrbusTransmit();
-
-			// If we're here, we failed to start transmission due to somebody else transmitting
-			// Given that our transmit buffer is full, priority one should be getting that data onto
-			// the bus so we can start using our tx buffer again.  So we stay in the while loop, trying
-			// to get bus time.
-
-			// We want to wait 20ms before we try a retransmit to avoid hammering the bus
-			// Because MRBus has a minimum packet size of 6 bytes @ 57.6kbps,
-			// need to check roughly every millisecond to see if we have a new packet
-			// so that we don't miss things we're receiving while waiting to transmit
-			if (fail)
-			{
-				uint8_t bus_countdown = 20;
-				while (bus_countdown-- > 0 && !mrbusIsBusIdle())
-				{
-					wdt_reset();
-					_delay_ms(1);
-					if (mrbusPktQueueDepth(&mrbusRxQueue))
-						PktHandler();
-				}
-			}
-		}*/
 }
 
 void PktHandler(CPState_t *cpState)
