@@ -262,8 +262,6 @@ bool CPRouteNoneSet(CPState_t *cpState)
 	return true;
 }
 
-
-
 void CPSignalsToOutputs(CPState_t *cpState, XIOControl* xio, bool blinkerOn)
 {
 	uint8_t sigDefIdx;

@@ -172,62 +172,6 @@ void init(void)
 	busVoltageMonitorInit();
 }
 
-void SetTurnout(uint8_t turnout, uint8_t points)
-{
-	/*uint8_t options = eeprom_read_byte((uint8_t*)EE_OPTIONS);
-
-	if (POINTS_UNAFFECTED == points)
-		return;
-
-	switch(turnout)
-	{
-		case TURNOUT_E_XOVER:
-			if (POINTS_REVERSE_FORCE == points || (POINTS_REVERSE_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
-			{
-				turnouts |= PNTS_EX_CNTL;
-				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
-				if (options & 0x01)
-					xio1Outputs[2] |= PNTS_EX_CNTL;
-				else
-					xio1Outputs[2] &= ~(PNTS_EX_CNTL); 
-			}
-			else if (POINTS_NORMAL_FORCE == points || (POINTS_NORMAL_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
-			{
-				turnouts &= ~(PNTS_EX_CNTL);
-				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
-				if (options & 0x01)
-					xio1Outputs[2] &= ~(PNTS_EX_CNTL); 
-				else
-					xio1Outputs[2] |= PNTS_EX_CNTL;
-			}
-			break;
-
-		case TURNOUT_W_XOVER:
-			if (POINTS_REVERSE_FORCE == points || (POINTS_REVERSE_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
-			{
-				turnouts |= PNTS_WX_CNTL;
-				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
-				if (options & 0x02)
-					xio1Outputs[2] |= PNTS_WX_CNTL;
-				else
-					xio1Outputs[2] &= ~(PNTS_WX_CNTL); 
-			}
-			else if (POINTS_NORMAL_FORCE == points || (POINTS_NORMAL_SAFE == points && !(occupancy[0] & OCC_OS_SECT)))
-			{
-				turnouts &= ~(PNTS_WX_CNTL);
-				// Implementation-specific behaviour - do whatever needs to happen to physically move the turnout here
-				if (options & 0x02)
-					xio1Outputs[2] &= ~(PNTS_WX_CNTL); 
-				else
-					xio1Outputs[2] |= PNTS_WX_CNTL;
-			}
-			break;
-
-		default:
-			break;
-	}*/
-}
-
 
 void CodeCTCRoute(uint8_t controlPoint, uint8_t newPointsE, uint8_t newPointsW, uint8_t newClear)
 {
@@ -695,15 +639,28 @@ uint8_t cpStateToStatusPacket(CPState_t* cpState, uint8_t *mrbTxBuffer, uint8_t 
 
 }
 
-
-
-bool cpCodeRoute(CPState_t* state, CPRouteEntrance_t entrance, bool setRoute)
+bool cpSetTurnout(CPState_t* cpState, CPTurnoutNames_t turnout, bool setNormal)
 {
-	if (STATE_LOCKED != CPTimelockStateGet(state, MAIN_TIMELOCK))
+	if (STATE_LOCKED != CPTimelockStateGet(cpState, MAIN_TIMELOCK))
+		return false; // Can't set any turnout when the timelock is open
+
+	if (CPInputStateGet(cpState, VOCC_M1_OS) || CPInputStateGet(cpState, VOCC_M2_OS))
+		return false; // Can't set any turnout when the CP tracks are occupied
+		
+	if (CPTurnoutLockGet(cpState, turnout))
+		return false; // Turnout locked, cannot change
+		
+	CPTurnoutRequestedDirectionSet(cpState, turnout, setNormal);
+	return true;
+}
+
+bool cpCodeRoute(CPState_t* cpState, CPRouteEntrance_t entrance, bool setRoute)
+{
+	if (STATE_LOCKED != CPTimelockStateGet(cpState, MAIN_TIMELOCK))
 		return false; // Can't set any route when the timelock is open
 
-	bool eastCrossover = CPTurnoutRequestedDirectionGet(state, TURNOUT_E_XOVER);
-	bool westCrossover = CPTurnoutRequestedDirectionGet(state, TURNOUT_W_XOVER);
+	bool eastCrossover = CPTurnoutRequestedDirectionGet(cpState, TURNOUT_E_XOVER);
+	bool westCrossover = CPTurnoutRequestedDirectionGet(cpState, TURNOUT_W_XOVER);
 	
 	// Remember, with turnouts normal = true
 
@@ -717,19 +674,19 @@ bool cpCodeRoute(CPState_t* state, CPRouteEntrance_t entrance, bool setRoute)
 			{
 				// Both crossovers normal, straight through route
 				// Is there already a conflicting route set?
-				if (CPRouteTest(state, ROUTE_MAIN1_WESTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN1_WESTBOUND))
 					return false;
 
 				// Lock turnouts
-				cpLockAllTurnouts(state);
+				cpLockAllTurnouts(cpState);
 				// Set route
-				CPRouteSet(state, ROUTE_MAIN1_EASTBOUND);
+				CPRouteSet(cpState, ROUTE_MAIN1_EASTBOUND);
 			} else {
 				// West crossover reversed, M1->M2
-				if (CPRouteTest(state, ROUTE_MAIN2_TO_MAIN1_WESTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND))
 					return false;
 
-				CPRouteSet(state, ROUTE_MAIN1_TO_MAIN2_EASTBOUND);
+				CPRouteSet(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND);
 			}
 			break;
 			
@@ -742,19 +699,19 @@ bool cpCodeRoute(CPState_t* state, CPRouteEntrance_t entrance, bool setRoute)
 			{
 				// Both crossovers normal, straight through route
 				// Is there already a conflicting route set?
-				if (CPRouteTest(state, ROUTE_MAIN1_EASTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN1_EASTBOUND))
 					return false;
 
 				// Lock turnouts
-				cpLockAllTurnouts(state);
+				cpLockAllTurnouts(cpState);
 				// Set route
-				CPRouteSet(state, ROUTE_MAIN1_WESTBOUND);
+				CPRouteSet(cpState, ROUTE_MAIN1_WESTBOUND);
 			} else {
 				// West crossover reversed, M1->M2
-				if (CPRouteTest(state, ROUTE_MAIN2_TO_MAIN1_EASTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND))
 					return false;
 
-				CPRouteSet(state, ROUTE_MAIN1_TO_MAIN2_WESTBOUND);
+				CPRouteSet(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND);
 			}
 			break;
 		
@@ -762,29 +719,29 @@ bool cpCodeRoute(CPState_t* state, CPRouteEntrance_t entrance, bool setRoute)
 			if (!eastCrossover && !westCrossover)
 			{
 				// Main 2 -> Main 2 via Main 1 - icky
-				if (CPRouteTest(state, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND))
 					return false;
 
-				cpLockAllTurnouts(state);
-				CPRouteSet(state, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND);
+				cpLockAllTurnouts(cpState);
+				CPRouteSet(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND);
 				
 			} else if (eastCrossover && westCrossover) {
 				// Both crossovers normal, straight through route
 				// Is there already a conflicting route set?
-				if (CPRouteTest(state, ROUTE_MAIN2_WESTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN2_WESTBOUND))
 					return false;
 
 				// Set route
-				cpLockAllTurnouts(state);
-				CPRouteSet(state, ROUTE_MAIN2_EASTBOUND);
+				cpLockAllTurnouts(cpState);
+				CPRouteSet(cpState, ROUTE_MAIN2_EASTBOUND);
 				return true;
 			} else if (!westCrossover && eastCrossover) {
 				// West crossover reversed, M2->M1
-				if (CPRouteTest(state, ROUTE_MAIN1_TO_MAIN2_WESTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND))
 					return false;
 
-				cpLockAllTurnouts(state);
-				CPRouteSet(state, ROUTE_MAIN2_TO_MAIN1_EASTBOUND);
+				cpLockAllTurnouts(cpState);
+				CPRouteSet(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND);
 				return true;
 			} else {
 				return false;
@@ -796,29 +753,29 @@ bool cpCodeRoute(CPState_t* state, CPRouteEntrance_t entrance, bool setRoute)
 			if (!eastCrossover && !westCrossover)
 			{
 				// Main 2 -> Main 2 via Main 1 - icky
-				if (CPRouteTest(state, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND))
 					return false;
 					
-				cpLockAllTurnouts(state);
-				CPRouteSet(state, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND);
+				cpLockAllTurnouts(cpState);
+				CPRouteSet(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND);
 				return true;
 			} else if (eastCrossover && westCrossover) {
 				// Both crossovers normal, straight through route
 				// Is there already a conflicting route set?
-				if (CPRouteTest(state, ROUTE_MAIN2_EASTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN2_EASTBOUND))
 					return false;
 
 				// Set route
-				cpLockAllTurnouts(state);
-				CPRouteSet(state, ROUTE_MAIN2_WESTBOUND);
+				cpLockAllTurnouts(cpState);
+				CPRouteSet(cpState, ROUTE_MAIN2_WESTBOUND);
 				return true;
 			} else if (!westCrossover && eastCrossover) {
 				// West crossover reversed, M2->M1
-				if (CPRouteTest(state, ROUTE_MAIN1_TO_MAIN2_EASTBOUND))
+				if (CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND))
 					return false;
 
-				cpLockAllTurnouts(state);
-				CPRouteSet(state, ROUTE_MAIN2_TO_MAIN1_WESTBOUND);
+				cpLockAllTurnouts(cpState);
+				CPRouteSet(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND);
 				return true;
 			} else {
 				return false;
@@ -1083,12 +1040,11 @@ void PktHandler(CPState_t *cpState)
 			//  byte 6:
 			//    'G' - Set/Clear route from entrance signal (byte 7 signal number, byte 8 'S'/'C' for set/clear)
 			//    'T' - Set turnout (byte 7) normal or diverging ('M'/'D' - byte 8)
+			if (rxBuffer[MRBUS_PKT_LEN] >= 9 && 'G' == rxBuffer[6] && ('S' == rxBuffer[8] || 'C' == rxBuffer[8]))
+				cpCodeRoute(cpState, rxBuffer[7], ('S' == rxBuffer[8])?true:false);
 
-/*			if (rxBuffer[MRBUS_PKT_LEN] >= 9 && 'G' == rxBuffer[6] && ('S' == rxBuffer[8] || 'C' == rxBuffer[8]))
-				CodeCTCRoute(rxBuffer[7], rxBuffer[8]);
-
-			if (rxBuffer[MRBUS_PKT_LEN] >= 9 && 'T' == rxBuffer[6] && ('S' == rxBuffer[8] || 'C' == rxBuffer[8]))
-				SetTurnout(rxBuffer[7], rxBuffer[8]);*/
+			if (rxBuffer[MRBUS_PKT_LEN] >= 9 && 'T' == rxBuffer[6] && ('M' == rxBuffer[8] || 'D' == rxBuffer[8]))
+				cpSetTurnout(cpState, rxBuffer[7], ('M'==rxBuffer[8])?true:false);
 
 			goto PktIgnore;
 
