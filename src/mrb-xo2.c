@@ -131,6 +131,18 @@ ISR(TIMER0_COMPA_vect)
 
 // End of 100Hz timer
 
+void cpLockAllTurnouts(CPState_t* state)
+{
+	CPTurnoutLockSet(state, TURNOUT_E_XOVER, true);
+	CPTurnoutLockSet(state, TURNOUT_W_XOVER, true);
+}
+
+void cpUnlockAllTurnouts(CPState_t* state)
+{
+	CPTurnoutLockSet(state, TURNOUT_E_XOVER, false);
+	CPTurnoutLockSet(state, TURNOUT_W_XOVER, false);
+}
+
 
 void init(void)
 {
@@ -216,55 +228,6 @@ void SetTurnout(uint8_t turnout, uint8_t points)
 	}*/
 }
 
-uint8_t GetTurnout(uint8_t turnout)
-{
-/*	switch(turnout)
-	{
-		case TURNOUT_E_XOVER:
-			return ((turnouts & PNTS_EX_CNTL)?1:0);
-		case TURNOUT_W_XOVER:
-			return ((turnouts & PNTS_WX_CNTL)?1:0);
-	}
-
-	return(0);*/
-	return 0;
-}
-
-uint8_t GetClearance(uint8_t controlPoint)
-{
-/*	switch(controlPoint)
-	{
-		case CONTROLPOINT_1:
-			return(clearance & 0x0F);
-
-	}
-	return(CLEARANCE_NONE); */
-	return 0;
-}
-
-void SetClearance(uint8_t controlPoint, uint8_t newClear)
-{
-/*	if (CLEARANCE_NONE != newClear 
-		&& CLEARANCE_EAST  != newClear 
-		&& CLEARANCE_WEST != newClear)
-		return;
-
-	switch(controlPoint)
-	{
-		case CONTROLPOINT_1:
-			if (CLEARANCE_NONE != newClear)
-			{
-				if (OCC_OS_SECT & occupancy[0])
-					break;
-			}
-			clearance &= 0xF0;
-			clearance |= newClear;
-			break;
-
-		default:
-			break;
-	}*/
-}
 
 void CodeCTCRoute(uint8_t controlPoint, uint8_t newPointsE, uint8_t newPointsW, uint8_t newClear)
 {
@@ -277,151 +240,304 @@ void CodeCTCRoute(uint8_t controlPoint, uint8_t newPointsE, uint8_t newPointsW, 
 
 static inline void vitalLogic(CPState_t *cpState)
 {
-//	uint8_t turnoutLocked = (!(((turnouts & (PNTS_EX_STATUS | PNTS_WX_STATUS))?1:0) ^ ((turnouts & (PNTS_EX_STATUS | PNTS_WX_STATUS))?1:0)));
-//	uint8_t cleared = CLEARANCE_NONE;
+	bool occupancyMain1 = CPInputStateGet(cpState, VOCC_M1_OS);
+	bool occupancyMain2 = CPInputStateGet(cpState, VOCC_M2_OS);
+
+	// First, if we have occupancy, drop any routes affected
+	if (occupancyMain1 || occupancyMain2)
+	{
+		CPRouteClear(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND);
+	}
+	
+	if (occupancyMain1)
+	{
+		CPRouteClear(cpState, ROUTE_MAIN1_EASTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN1_WESTBOUND);
+	}
+	
+	if (occupancyMain2)
+	{
+		CPRouteClear(cpState, ROUTE_MAIN2_EASTBOUND);
+		CPRouteClear(cpState, ROUTE_MAIN2_WESTBOUND);
+	}
+	
+
+	// Now, unlock appropriate turnouts if no routes are set and there's no occupancy
+	if (!(occupancyMain1 || occupancyMain2) && CPRouteNoneSet(cpState))
+	{
+		cpUnlockAllTurnouts(cpState);
+	}
+	
+	/*
+	 * 	ROUTE_NONE,
+	ROUTE_MAIN1_EASTBOUND,
+	ROUTE_MAIN1_WESTBOUND,
+	ROUTE_MAIN2_EASTBOUND,
+	ROUTE_MAIN2_WESTBOUND,
+	ROUTE_MAIN2_VIA_MAIN1_EASTBOUND,
+	ROUTE_MAIN2_VIA_MAIN1_WESTBOUND,
+	ROUTE_MAIN1_TO_MAIN2_EASTBOUND,
+	ROUTE_MAIN1_TO_MAIN2_WESTBOUND,
+	ROUTE_MAIN2_TO_MAIN1_EASTBOUND,
+	ROUTE_MAIN2_TO_MAIN1_WESTBOUND
+	* 
+	* 	SIG_MAIN1_E_UPPER,
+	SIG_MAIN1_E_LOWER,
+	SIG_MAIN2_E_UPPER,
+	SIG_MAIN2_E_LOWER,
+	SIG_MAIN1_W_UPPER,
+	SIG_MAIN1_W_LOWER, 
+	SIG_MAIN2_W_UPPER,
+	SIG_MAIN2_W_LOWER,
+	* 
+	* 	ASPECT_OFF       = 0,
+	ASPECT_GREEN     = 1,
+	ASPECT_YELLOW    = 2,
+	ASPECT_FL_YELLOW = 3,
+	ASPECT_RED       = 4,
+	ASPECT_FL_GREEN  = 5,
+	ASPECT_FL_RED    = 6,
+	ASPECT_LUNAR     = 7
+	* 
+	* 
+	* */
+
+	bool eastCrossover = CPTurnoutActualDirectionGet(cpState, TURNOUT_E_XOVER);
+	bool westCrossover = CPTurnoutActualDirectionGet(cpState, TURNOUT_W_XOVER);
 
 	// Start out with a safe default - everybody red
 	CPSignalHeadAllSetAspect(cpState, ASPECT_RED);
 
-/*	// Drop clearance if we see occupancy
-	if (occupancy[0] & OCC_OS_SECT)
-		SetClearance(CONTROLPOINT_1, CLEARANCE_NONE);
-
-	cleared = GetClearance(CONTROLPOINT_1);
-	
-	if (STATE_UNLOCKED == turnoutState || STATE_RELOCKING == turnoutState)
+	if (CPTurnoutRequestedDirectionGet(cpState, TURNOUT_E_XOVER) != CPTurnoutActualDirectionGet(cpState, TURNOUT_E_XOVER)
+		|| CPTurnoutRequestedDirectionGet(cpState, TURNOUT_W_XOVER) != CPTurnoutActualDirectionGet(cpState, TURNOUT_W_XOVER))
 	{
-
-		if(turnouts & (PNTS_EX_STATUS))
-		{
-			signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_RED;
-			signalHeads[SIG_MAIN_A] = ASPECT_FL_RED;
-		}
-		else if (!(turnouts & (PNTS_EX_STATUS)) && (turnouts & (PNTS_WX_STATUS)))
-		{
-			signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_RED;
-			signalHeads[SIG_MAIN_C] = ASPECT_FL_RED;
-		}
-		else if (!(turnouts & (PNTS_EX_STATUS)) && !(turnouts & (PNTS_WX_STATUS)))
-		{
-			signalHeads[SIG_PNTS_UPPER] = ASPECT_FL_RED;
-			signalHeads[SIG_MAIN_B] = ASPECT_FL_RED;
-		}
-
-	} 
-	else if (turnoutLocked && CLEARANCE_EAST == cleared)
-	{
-		// Eastbound clearance at the east control point means frog->points movement direction
-		uint8_t head = 0;
-		
-		if(turnouts & (PNTS_EX_STATUS))
-		{
-			head = SIG_MAIN_A;
-		}
-		else if (!(turnouts & (PNTS_EX_STATUS)) && (turnouts & (PNTS_WX_STATUS)))
-		{
-			head = SIG_MAIN_C;
-		}
-		else if (!(turnouts & (PNTS_EX_STATUS)) && !(turnouts & (PNTS_WX_STATUS)))
-		{
-			head = SIG_MAIN_B;
-		}
-		
-		if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_P_ADJOIN) || (OCC_OS_SECT & occupancy[0]))
-			signalHeads[head] = ASPECT_RED;
-		else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_P_APPROACH))
-			signalHeads[head] = ASPECT_YELLOW;
-		else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_P_APPROACH2))
-			signalHeads[head] = ASPECT_FL_YELLOW;
-		else
-			signalHeads[head] = ASPECT_GREEN;
+		// Turnouts are in motion - RED!
 	}
-	else if (turnoutLocked && CLEARANCE_WEST == cleared)
+	else if (STATE_LOCKED != CPTimelockStateGet(cpState, MAIN_TIMELOCK))
 	{
-		// Westbound clearance at the east control point means points->frog movement direction	
-		if(turnouts & (PNTS_EX_STATUS))
+		// Timelock isn't locked - RED!
+		if (STATE_UNLOCKED == CPTimelockStateGet(cpState, MAIN_TIMELOCK))
 		{
-			// Lined to siding
-			if ((OCC_OS_SECT & occupancy[0]) || getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MA_ADJOIN))
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_RED;
-			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MA_APPROACH))
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_YELLOW;
-			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MA_APPROACH2))
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_YELLOW;
-			else
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_GREEN;
-		}
-		else if (!(turnouts & (PNTS_EX_STATUS)) && (turnouts & (PNTS_WX_STATUS)))
-		{
-			if ((OCC_OS_SECT & occupancy[0]) || getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MC_ADJOIN))
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_RED;
-			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MC_APPROACH))
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_YELLOW;
-			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MC_APPROACH2))
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_FL_YELLOW;
-			else
-				signalHeads[SIG_PNTS_LOWER] = ASPECT_GREEN;
-		}
-		else if (!(turnouts & (PNTS_EX_STATUS)) && !(turnouts & (PNTS_WX_STATUS)))
-		{
-			if ((OCC_OS_SECT & occupancy[0]) || getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MB_ADJOIN))
-				signalHeads[SIG_PNTS_UPPER] = ASPECT_RED;
-			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MB_APPROACH))
-				signalHeads[SIG_PNTS_UPPER] = ASPECT_YELLOW;
-			else if (getExtInput(ext_occupancy, sizeof(ext_occupancy), XOCC_MB_APPROACH2))
-				signalHeads[SIG_PNTS_UPPER] = ASPECT_FL_YELLOW;
-			else
-				signalHeads[SIG_PNTS_UPPER] = ASPECT_GREEN;
+			// If we're actually unlocked, put up restricting indications where appropriate
+			if (eastCrossover && westCrossover) // Both normal
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_UPPER, ASPECT_FL_RED);
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_UPPER, ASPECT_FL_RED);
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_FL_RED);
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_FL_RED);
+			}
+			else if (eastCrossover && !westCrossover)
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_LOWER, ASPECT_FL_RED);
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_FL_RED);
+			}
+			else if (!eastCrossover && westCrossover)
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_LOWER, ASPECT_FL_RED);
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_FL_RED);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_FL_RED);
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_FL_RED);
+			}
+
 		}
 	}
-	// The else case is that the turnout isn't locked up or we're not cleared
-	// Good news - the signals are already defaulted to red
-
-	// Clear virtual occupancies
-	occupancy[0] &= ~(OCC_VIRT_P_APPROACH | OCC_VIRT_P_ADJOIN | OCC_VIRT_MA_APPROACH | OCC_VIRT_MA_ADJOIN | OCC_VIRT_MB_APPROACH | OCC_VIRT_MB_ADJOIN);
-	occupancy[1] &= ~(OCC_VIRT_MC_APPROACH | OCC_VIRT_MC_ADJOIN);
-
-	// Calculate east CP virtual occupancies
-	if(turnoutLocked)
+	else
 	{
-		if(ASPECT_FL_RED == signalHeads[SIG_MAIN_A] || ASPECT_RED == signalHeads[SIG_MAIN_A])
-			occupancy[0] |= OCC_VIRT_MA_ADJOIN | OCC_VIRT_MA_APPROACH;
-		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN_A])
-			occupancy[0] |= OCC_VIRT_MA_APPROACH;
+		// Work through all routes set, setting signals appropriate to state
+		if (CPRouteTest(cpState, ROUTE_MAIN1_EASTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_LOWER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M1E_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_UPPER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1E_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_UPPER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1E_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_UPPER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_UPPER, ASPECT_GREEN);
+			}
+		}
+		else if (CPRouteTest(cpState, ROUTE_MAIN1_WESTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_LOWER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M1W_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_UPPER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1W_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_UPPER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1W_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_UPPER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_UPPER, ASPECT_GREEN);
+			}
+		}
 
-		if(ASPECT_FL_RED == signalHeads[SIG_MAIN_B] || ASPECT_RED == signalHeads[SIG_MAIN_B])
-			occupancy[0] |= OCC_VIRT_MB_ADJOIN | OCC_VIRT_MB_APPROACH;
-		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN_B])
-			occupancy[0] |= OCC_VIRT_MB_APPROACH;
-
-		if(ASPECT_FL_RED == signalHeads[SIG_MAIN_C] || ASPECT_RED == signalHeads[SIG_MAIN_C])
-			occupancy[1] |= OCC_VIRT_MC_ADJOIN | OCC_VIRT_MC_APPROACH;
-		else if (ASPECT_YELLOW == signalHeads[SIG_MAIN_C])
-			occupancy[1] |= OCC_VIRT_MC_APPROACH;
-
+		if (CPRouteTest(cpState, ROUTE_MAIN2_EASTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M2E_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2E_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2E_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_GREEN);
+			}
+		} 
+		else if (CPRouteTest(cpState, ROUTE_MAIN2_WESTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M2W_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2W_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2W_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_GREEN);
+			}
+		}
+		else if (CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M2E_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2E_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2E_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_GREEN);
+			}
+		}
+		else if (CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M2W_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2W_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2W_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_GREEN);
+			}
+		}
 		
-		// Turnout is properly lined one way or the other
-		if ((ASPECT_FL_RED == signalHeads[SIG_PNTS_LOWER] || ASPECT_RED == signalHeads[SIG_PNTS_LOWER]) && (ASPECT_RED == signalHeads[SIG_PNTS_UPPER] || ASPECT_FL_RED == signalHeads[SIG_PNTS_UPPER]))
-			occupancy[0] |= OCC_VIRT_P_ADJOIN | OCC_VIRT_P_APPROACH;
-		else if (ASPECT_YELLOW == signalHeads[SIG_PNTS_LOWER] || ASPECT_FL_YELLOW == signalHeads[SIG_PNTS_LOWER] || ASPECT_YELLOW == signalHeads[SIG_PNTS_UPPER] || ASPECT_FL_YELLOW == signalHeads[SIG_PNTS_UPPER])
-			occupancy[0] |= OCC_VIRT_P_APPROACH;
-	
-	} else {
-		//  Control Point improperly lined, trip virtual occupancy
-		occupancy[0] |= OCC_VIRT_P_APPROACH | OCC_VIRT_P_ADJOIN | OCC_VIRT_MA_APPROACH | OCC_VIRT_MA_ADJOIN | OCC_VIRT_MB_APPROACH | OCC_VIRT_MB_ADJOIN;
-		occupancy[1] |= OCC_VIRT_MC_APPROACH | OCC_VIRT_MC_ADJOIN;
-	}*/
+		// Work through all routes set, setting signals appropriate to state
+		if (CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_UPPER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M2E_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_LOWER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2E_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_LOWER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2E_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_LOWER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_W_LOWER, ASPECT_GREEN);
+			}
+		}
+		else if (CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_UPPER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M2W_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_LOWER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2W_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_LOWER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M2W_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_LOWER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN1_E_LOWER, ASPECT_GREEN);
+			}
+		}
+		else if (CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_UPPER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M1E_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1E_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1E_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_W_LOWER, ASPECT_GREEN);
+			}
+		}
+		else if (CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND))
+		{
+			CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_UPPER, ASPECT_RED);
+			if (CPInputStateGet(cpState, VOCC_M1W_ADJOIN))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_RED);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1W_APPROACH))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_YELLOW);
+			}
+			else if (CPInputStateGet(cpState, VOCC_M1W_APPROACH2))
+			{
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_FL_YELLOW);
+			} else {
+				CPSignalHeadSetAspect(cpState, SIG_MAIN2_E_LOWER, ASPECT_GREEN);
+			}
+		}
+	}
 
-}
 
-bool pointsUnlockedSwitch()
-{
-/*	bool timelockSwitchInverted = (OPTIONS_INVERT_TIMELOCK & eeprom_read_byte((uint8_t*)EE_OPTIONS));
-	bool retval = (debounced_inputs[0] & PNTS_UNLOCK)?false:true;
-	if (timelockSwitchInverted)
-		retval = !retval;
-	return retval;*/
-	return false;
+
+
 }
 
 // For the XIO pins, 0 is output, 1 is input
@@ -432,16 +548,298 @@ void setTimelockLED(XIOControl* xio, bool state)
 	xioSetDeferredIObyPortBit(xio, XIO_PORT_D, 0, state);
 }
 
-// Returns true if the timelock switch is unlocked (manual control)
-bool getTimelockSwitchState(XIOControl* xio)
+
+/*
+ West M2 -------------------  M2 East
+             \        /
+      M1 -------------------  M1
+*/
+
+
+#define MRB_STATUS6_MAIN1_OS_OCC        0x01
+#define MRB_STATUS6_MAIN2_OS_OCC        0x02
+#define MRB_STATUS6_M1E_ENTR_CLEARED    0x04
+#define MRB_STATUS6_M1W_ENTR_CLEARED    0x08
+#define MRB_STATUS6_M2E_ENTR_CLEARED    0x10
+#define MRB_STATUS6_M2W_ENTR_CLEARED    0x20
+
+
+#define MRB_STATUS7_E_XOVER_NORMAL      0x01
+#define MRB_STATUS7_E_XOVER_REVERSE     0x02
+#define MRB_STATUS7_E_XOVER_MANUAL      0x04
+#define MRB_STATUS7_E_XOVER_LOCK        0x08
+#define MRB_STATUS7_W_XOVER_NORMAL      0x10
+#define MRB_STATUS7_W_XOVER_REVERSE     0x20
+#define MRB_STATUS7_W_XOVER_MANUAL      0x40
+#define MRB_STATUS7_W_XOVER_LOCK        0x80
+
+#define MRB_STATUS8_M1E_VIRT_ADJ        0x01
+#define MRB_STATUS8_M1E_VIRT_APPR       0x02
+#define MRB_STATUS8_M1E_VIRT_APPR2      0x04
+#define MRB_STATUS8_M1E_VIRT_TUMBLE     0x08
+#define MRB_STATUS8_M1W_VIRT_ADJ        0x10
+#define MRB_STATUS8_M1W_VIRT_APPR       0x20
+#define MRB_STATUS8_M1W_VIRT_APPR2      0x40
+#define MRB_STATUS8_M1W_VIRT_TUMBLE     0x80
+
+#define MRB_STATUS9_M2E_VIRT_ADJ        0x01
+#define MRB_STATUS9_M2E_VIRT_APPR       0x02
+#define MRB_STATUS9_M2E_VIRT_APPR2      0x04
+#define MRB_STATUS9_M2E_VIRT_TUMBLE     0x08
+#define MRB_STATUS9_M2W_VIRT_ADJ        0x10
+#define MRB_STATUS9_M2W_VIRT_APPR       0x20
+#define MRB_STATUS9_M2W_VIRT_APPR2      0x40
+#define MRB_STATUS9_M2W_VIRT_TUMBLE     0x80
+
+#define OCC_VIRT_ADJ        0x01
+#define OCC_VIRT_APPR       0x02
+#define OCC_VIRT_APPR2      0x04
+
+uint8_t SignalHeadsToVirtOcc(SignalHeadAspect_t upperHead, SignalHeadAspect_t lowerHead)
 {
-	return xioGetDebouncedIObyPortBit(xio, XIO_PORT_D, 1);
+	uint8_t mask = 0;
+	
+	if ( (upperHead == ASPECT_RED || upperHead == ASPECT_FL_RED || upperHead == ASPECT_LUNAR)
+		&& (lowerHead == ASPECT_RED || lowerHead == ASPECT_FL_RED || lowerHead == ASPECT_LUNAR))
+		mask |= (OCC_VIRT_ADJ | OCC_VIRT_APPR | OCC_VIRT_APPR2);
+	else if (upperHead == ASPECT_YELLOW || lowerHead == ASPECT_YELLOW)
+		mask |= (OCC_VIRT_APPR | OCC_VIRT_APPR2);
+	else if (upperHead == ASPECT_FL_YELLOW || lowerHead == ASPECT_FL_YELLOW)
+		mask |= (OCC_VIRT_APPR2);
+
+	return mask;
+}
+
+
+uint8_t cpStateToStatusPacket(CPState_t* cpState, uint8_t *mrbTxBuffer, uint8_t mrbTxBufferSz)
+{
+	memset(mrbTxBuffer, 0, mrbTxBufferSz);
+	
+	mrbTxBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+	mrbTxBuffer[MRBUS_PKT_DEST] = 0xFF;
+	mrbTxBuffer[MRBUS_PKT_LEN] = 12;
+	mrbTxBuffer[5] = 'S';
+	
+	// Byte 6 - Occupancy & Entrance Signals
+	if (CPInputStateGet(cpState, VOCC_M1_OS))
+		mrbTxBuffer[6] |= MRB_STATUS6_MAIN1_OS_OCC;
+
+	if (CPInputStateGet(cpState, VOCC_M2_OS))
+		mrbTxBuffer[6] |= MRB_STATUS6_MAIN2_OS_OCC;
+
+
+	if (CPRouteTest(cpState, ROUTE_MAIN1_WESTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND))
+		mrbTxBuffer[6] |= MRB_STATUS6_M1E_ENTR_CLEARED;
+
+	if (CPRouteTest(cpState, ROUTE_MAIN1_EASTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND))
+		mrbTxBuffer[6] |= MRB_STATUS6_M1W_ENTR_CLEARED;
+
+	if (CPRouteTest(cpState, ROUTE_MAIN2_WESTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND))
+		mrbTxBuffer[6] |= MRB_STATUS6_M2E_ENTR_CLEARED;
+
+	if (CPRouteTest(cpState, ROUTE_MAIN2_EASTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND))
+		mrbTxBuffer[6] |= MRB_STATUS6_M2W_ENTR_CLEARED;
+
+	// Byte 7 - turnout states
+	if (STATE_LOCKED != CPTimelockStateGet(cpState, MAIN_TIMELOCK))
+		mrbTxBuffer[7] |= MRB_STATUS7_E_XOVER_MANUAL | MRB_STATUS7_W_XOVER_MANUAL;
+
+	if (CPTurnoutActualDirectionGet(cpState, TURNOUT_E_XOVER))
+		mrbTxBuffer[7] |= MRB_STATUS7_E_XOVER_NORMAL;
+	else
+		mrbTxBuffer[7] |= MRB_STATUS7_E_XOVER_REVERSE;
+
+	if (CPTurnoutLockGet(cpState, TURNOUT_E_XOVER))
+		mrbTxBuffer[7] |= MRB_STATUS7_E_XOVER_LOCK;
+
+	if (CPTurnoutActualDirectionGet(cpState, TURNOUT_W_XOVER))
+		mrbTxBuffer[7] |= MRB_STATUS7_W_XOVER_NORMAL;
+	else
+		mrbTxBuffer[7] |= MRB_STATUS7_W_XOVER_REVERSE;
+
+	if (CPTurnoutLockGet(cpState, TURNOUT_W_XOVER))
+		mrbTxBuffer[7] |= MRB_STATUS7_W_XOVER_LOCK;
+
+	// Compute virtual occupancy
+	mrbTxBuffer[8] = SignalHeadsToVirtOcc(CPSignalHeadGetAspect(cpState, SIG_MAIN1_E_UPPER), CPSignalHeadGetAspect(cpState, SIG_MAIN1_E_LOWER))
+		| (SignalHeadsToVirtOcc(CPSignalHeadGetAspect(cpState, SIG_MAIN1_W_UPPER), CPSignalHeadGetAspect(cpState, SIG_MAIN1_W_LOWER))<<4);
+
+	if (CPRouteTest(cpState, ROUTE_MAIN1_WESTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND))
+		mrbTxBuffer[8] |= MRB_STATUS8_M1W_VIRT_TUMBLE;
+
+	if (CPRouteTest(cpState, ROUTE_MAIN1_EASTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND))
+		mrbTxBuffer[8] |= MRB_STATUS8_M1E_VIRT_TUMBLE;
+
+	mrbTxBuffer[9] = SignalHeadsToVirtOcc(CPSignalHeadGetAspect(cpState, SIG_MAIN2_E_UPPER), CPSignalHeadGetAspect(cpState, SIG_MAIN2_E_LOWER))
+		| (SignalHeadsToVirtOcc(CPSignalHeadGetAspect(cpState, SIG_MAIN2_W_UPPER), CPSignalHeadGetAspect(cpState, SIG_MAIN2_W_LOWER))<<4);
+
+	if (CPRouteTest(cpState, ROUTE_MAIN2_WESTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND))
+		mrbTxBuffer[9] |= MRB_STATUS9_M2W_VIRT_TUMBLE;
+
+	if (CPRouteTest(cpState, ROUTE_MAIN2_EASTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND)
+		|| CPRouteTest(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND))
+		mrbTxBuffer[9] |= MRB_STATUS9_M2E_VIRT_TUMBLE;
+
+	return mrbTxBuffer[MRBUS_PKT_LEN];
+
+}
+
+
+
+bool cpCodeRoute(CPState_t* state, CPRouteEntrance_t entrance, bool setRoute)
+{
+	if (STATE_LOCKED != CPTimelockStateGet(state, MAIN_TIMELOCK))
+		return false; // Can't set any route when the timelock is open
+
+	bool eastCrossover = CPTurnoutRequestedDirectionGet(state, TURNOUT_E_XOVER);
+	bool westCrossover = CPTurnoutRequestedDirectionGet(state, TURNOUT_W_XOVER);
+	
+	// Remember, with turnouts normal = true
+
+	switch(entrance)
+	{
+		case ROUTE_ENTR_M1_EASTBOUND:
+			if (!westCrossover) // Turnout set against us
+				return false;
+
+			if (eastCrossover)
+			{
+				// Both crossovers normal, straight through route
+				// Is there already a conflicting route set?
+				if (CPRouteTest(state, ROUTE_MAIN1_WESTBOUND))
+					return false;
+
+				// Lock turnouts
+				cpLockAllTurnouts(state);
+				// Set route
+				CPRouteSet(state, ROUTE_MAIN1_EASTBOUND);
+			} else {
+				// West crossover reversed, M1->M2
+				if (CPRouteTest(state, ROUTE_MAIN2_TO_MAIN1_WESTBOUND))
+					return false;
+
+				CPRouteSet(state, ROUTE_MAIN1_TO_MAIN2_EASTBOUND);
+			}
+			break;
+			
+			
+		case ROUTE_ENTR_M1_WESTBOUND:
+			if (!eastCrossover) // Turnout set against us
+				return false;
+				
+			if (westCrossover)
+			{
+				// Both crossovers normal, straight through route
+				// Is there already a conflicting route set?
+				if (CPRouteTest(state, ROUTE_MAIN1_EASTBOUND))
+					return false;
+
+				// Lock turnouts
+				cpLockAllTurnouts(state);
+				// Set route
+				CPRouteSet(state, ROUTE_MAIN1_WESTBOUND);
+			} else {
+				// West crossover reversed, M1->M2
+				if (CPRouteTest(state, ROUTE_MAIN2_TO_MAIN1_EASTBOUND))
+					return false;
+
+				CPRouteSet(state, ROUTE_MAIN1_TO_MAIN2_WESTBOUND);
+			}
+			break;
+		
+		case ROUTE_ENTR_M2_EASTBOUND:
+			if (!eastCrossover && !westCrossover)
+			{
+				// Main 2 -> Main 2 via Main 1 - icky
+				if (CPRouteTest(state, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND))
+					return false;
+
+				cpLockAllTurnouts(state);
+				CPRouteSet(state, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND);
+				
+			} else if (eastCrossover && westCrossover) {
+				// Both crossovers normal, straight through route
+				// Is there already a conflicting route set?
+				if (CPRouteTest(state, ROUTE_MAIN2_WESTBOUND))
+					return false;
+
+				// Set route
+				cpLockAllTurnouts(state);
+				CPRouteSet(state, ROUTE_MAIN2_EASTBOUND);
+				return true;
+			} else if (!westCrossover && eastCrossover) {
+				// West crossover reversed, M2->M1
+				if (CPRouteTest(state, ROUTE_MAIN1_TO_MAIN2_WESTBOUND))
+					return false;
+
+				cpLockAllTurnouts(state);
+				CPRouteSet(state, ROUTE_MAIN2_TO_MAIN1_EASTBOUND);
+				return true;
+			} else {
+				return false;
+			}
+			break;
+			
+			
+		case ROUTE_ENTR_M2_WESTBOUND:
+			if (!eastCrossover && !westCrossover)
+			{
+				// Main 2 -> Main 2 via Main 1 - icky
+				if (CPRouteTest(state, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND))
+					return false;
+					
+				cpLockAllTurnouts(state);
+				CPRouteSet(state, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND);
+				return true;
+			} else if (eastCrossover && westCrossover) {
+				// Both crossovers normal, straight through route
+				// Is there already a conflicting route set?
+				if (CPRouteTest(state, ROUTE_MAIN2_EASTBOUND))
+					return false;
+
+				// Set route
+				cpLockAllTurnouts(state);
+				CPRouteSet(state, ROUTE_MAIN2_WESTBOUND);
+				return true;
+			} else if (!westCrossover && eastCrossover) {
+				// West crossover reversed, M2->M1
+				if (CPRouteTest(state, ROUTE_MAIN1_TO_MAIN2_EASTBOUND))
+					return false;
+
+				cpLockAllTurnouts(state);
+				CPRouteSet(state, ROUTE_MAIN2_TO_MAIN1_WESTBOUND);
+				return true;
+			} else {
+				return false;
+			}
+			break;
+			
+		default:
+			break;
+	}
+	
+	return false;
 }
 
 
 
 void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
 {
+	// Copy over the actual states of each turnout
+	CPTurnoutActualDirectionSet(state, TURNOUT_E_XOVER, CPInputStateGet(state, E_XOVER_ACTUAL_POS));
+	CPTurnoutActualDirectionSet(state, TURNOUT_W_XOVER, CPInputStateGet(state, W_XOVER_ACTUAL_POS));
+
 	// First, deal with the timelock
 	bool manualUnlockSwitchOn = !CPInputStateGet(state, TIMELOCK_SW_POS);//getTimelockSwitchState(xio);
 	
@@ -462,13 +860,13 @@ void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
 			break;
 
 		case STATE_TIMERUN:
-			
 			if (!manualUnlockSwitchOn)
 				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_LOCKED);
 			else if (0 == CPTimelockTimeGet(state, MAIN_TIMELOCK))
 				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_UNLOCKED);
 			else
 			{
+				CPRouteAllClear(state);
 				CPTurnoutManualOperationsSet(state, TURNOUT_E_XOVER, true);
 				CPTurnoutManualOperationsSet(state, TURNOUT_W_XOVER, true);
 				setTimelockLED(xio, events & EVENT_BLINKY);
@@ -477,11 +875,14 @@ void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
 					
 		case STATE_UNLOCKED:
 			setTimelockLED(xio, true);
+			CPTurnoutLockSet(state, TURNOUT_E_XOVER, false);
+			CPTurnoutLockSet(state, TURNOUT_W_XOVER, false);
 			// Set requested directions here based on manual inputs
 			if (!manualUnlockSwitchOn)
 				CPTimelockStateSet(state, MAIN_TIMELOCK, STATE_RELOCKING);
 			else
 			{
+				CPRouteAllClear(state);
 				CPTurnoutManualOperationsSet(state, TURNOUT_E_XOVER, true);
 				CPTurnoutManualOperationsSet(state, TURNOUT_W_XOVER, true);
 
@@ -508,10 +909,15 @@ void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
 }
 
 
+
 int main(void)
 {
 	CPState_t cpState;
 	XIOControl xio1;
+	bool changed = false;
+	uint8_t update_decisecs = 20;
+	uint8_t lastStatusPacket[MRBUS_BUFFER_SIZE];
+	uint8_t mrbTxBuffer[MRBUS_BUFFER_SIZE];
 	// Application initialization
 	init();
 
@@ -578,6 +984,50 @@ int main(void)
 			CPTurnoutsToOutputs(&cpState, &xio1);
 			xioOutputWrite(&xio1);
 			events &= ~(EVENT_WRITE_OUTPUTS);
+		}
+		
+		uint8_t statusLen = cpStateToStatusPacket(&cpState, mrbTxBuffer, sizeof(mrbTxBuffer));
+		
+		if (0 != memcmp(mrbTxBuffer, lastStatusPacket, statusLen))
+		{
+			memset(lastStatusPacket, 0, sizeof(lastStatusPacket));
+			memcpy(lastStatusPacket, mrbTxBuffer, statusLen);
+			changed = true;
+		}
+		if(decisecs >= update_decisecs)
+			changed = true;
+
+		if (changed)
+		{
+			mrbusPktQueuePush(&mrbusTxQueue, mrbTxBuffer, statusLen);
+			decisecs = 0;
+		}
+
+		// If we have a packet to be transmitted, try to send it here
+		if (mrbusPktQueueDepth(&mrbusTxQueue))
+		{
+			uint8_t fail = mrbusTransmit();
+
+			// If we're here, we failed to start transmission due to somebody else transmitting
+			// Given that our transmit buffer is full, priority one should be getting that data onto
+			// the bus so we can start using our tx buffer again.  So we stay in the while loop, trying
+			// to get bus time.
+
+			// We want to wait 20ms before we try a retransmit to avoid hammering the bus
+			// Because MRBus has a minimum packet size of 6 bytes @ 57.6kbps,
+			// need to check roughly every millisecond to see if we have a new packet
+			// so that we don't miss things we're receiving while waiting to transmit
+			if (fail)
+			{
+				uint8_t bus_countdown = 40;
+				while (bus_countdown-- > 0 && !mrbusIsBusIdle())
+				{
+					wdt_reset();
+					_delay_ms(1);
+					if (mrbusPktQueueDepth(&mrbusRxQueue))
+						PktHandler(&cpState);
+				}
+			}
 		}
 	}
 }

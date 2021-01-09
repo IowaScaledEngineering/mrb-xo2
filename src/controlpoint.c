@@ -71,19 +71,59 @@ void CPInitializeTimelock(CPTimelock_t *timelock)
 	timelock->secs = 0;
 }
 
+void CPTurnoutLockSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setLock)
+{
+	if(turnoutID < TURNOUT_END)
+	{
+		state->turnouts[turnoutID].isLocked = setLock;
+	}
+}
+
+bool CPTurnoutLockGet(CPState_t *state, CPTurnoutNames_t turnoutID)
+{
+	if(turnoutID < TURNOUT_END)
+		return state->turnouts[turnoutID].isLocked;
+	return false;
+}
+
+
 void CPTurnoutRequestedDirectionSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setNormal)
 {
 	if(turnoutID < TURNOUT_END)
+	{
 		state->turnouts[turnoutID].isRequestedNormal = setNormal;
+	}
+}
+
+bool CPTurnoutRequestedDirectionGet(CPState_t *state, CPTurnoutNames_t turnoutID)
+{
+	if(turnoutID < TURNOUT_END)
+		return state->turnouts[turnoutID].isRequestedNormal;
+	return false;
 }
 
 void CPTurnoutManualOperationsSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setManual)
 {
 	if(turnoutID < TURNOUT_END)
+	{
 		state->turnouts[turnoutID].isManual = setManual;
+	}
 }
 
+void CPTurnoutActualDirectionSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setActual)
+{
+	if(turnoutID < TURNOUT_END)
+	{
+		state->turnouts[turnoutID].isNormal = setActual;
+	}
+}
 
+bool CPTurnoutActualDirectionGet(CPState_t *state, CPTurnoutNames_t turnoutID)
+{
+	if(turnoutID < TURNOUT_END)
+		return state->turnouts[turnoutID].isNormal;
+	return false;
+}
 
 void CPInitializeSignalHead(SignalHeadAspect_t *sig)
 {
@@ -170,6 +210,58 @@ void CPTurnoutsToOutputs(CPState_t *cpState, XIOControl* xio)
 		}
 	}
 }
+
+bool CPRouteSet(CPState_t *cpState, CPRoute_t route)
+{
+	for(uint8_t i=0; i<sizeof(cpState->routes)/sizeof(CPRoute_t); i++)
+	{
+		if (cpState->routes[i] == ROUTE_NONE || cpState->routes[i] == route)
+		{
+			cpState->routes[i] = route;
+			return true;
+		}
+	}
+	return false;
+}
+
+void CPRouteClear(CPState_t *cpState, CPRoute_t route)
+{
+	for(uint8_t i=0; i<sizeof(cpState->routes)/sizeof(CPRoute_t); i++)
+	{
+		if (cpState->routes[i] == route)
+			cpState->routes[i] = ROUTE_NONE;
+	}
+}
+
+void CPRouteAllClear(CPState_t *cpState)
+{
+	for(uint8_t i=0; i<sizeof(cpState->routes)/sizeof(CPRoute_t); i++)
+	{
+		cpState->routes[i] = ROUTE_NONE;
+	}
+}
+
+
+bool CPRouteTest(CPState_t *cpState, CPRoute_t route)
+{
+	for(uint8_t i=0; i<sizeof(cpState->routes)/sizeof(CPRoute_t); i++)
+	{
+		if (cpState->routes[i] == route)
+			return true;
+	}
+	return false;
+}
+
+bool CPRouteNoneSet(CPState_t *cpState)
+{
+	for(uint8_t i=0; i<sizeof(cpState->routes)/sizeof(CPRoute_t); i++)
+	{
+		if (cpState->routes[i] != ROUTE_NONE)
+			return false;
+	}
+	return true;
+}
+
 
 
 void CPSignalsToOutputs(CPState_t *cpState, XIOControl* xio, bool blinkerOn)
@@ -293,6 +385,9 @@ void CPInitialize(CPState_t* state)
 
 	for (i=0; i<sizeof(state->timelocks) / sizeof(CPTimelock_t); i++)
 		CPInitializeTimelock(&state->timelocks[i]);
+
+	CPRouteAllClear(state);
+
 }
 
 

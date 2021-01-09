@@ -29,6 +29,7 @@ LICENSE:
 #include "config-turnouts.h"
 #include "config-signals.h"
 #include "config-inputs.h"
+#include "config-route.h"
 
 #define BITBYTE_BYTENUM(a)   ((a) & 0x1F)
 #define BITBYTE_BITNUM(a)    ((a)>>5)
@@ -74,6 +75,7 @@ typedef struct
 	CPTurnout_t turnouts[TURNOUT_END];
 	CPInput_t inputs[VINPUT_END];
 	CPTimelock_t timelocks[TIMELOCK_END];
+	CPRoute_t routes[MAX_ROUTES];
 } CPState_t;
 
 void CPInitialize(CPState_t* state);
@@ -88,7 +90,12 @@ void CPXIOInputFilter(CPState_t* state, XIOControl* xio);
 // Turnout Functions
 void CPInitializeTurnout(CPTurnout_t *turnout);
 void CPTurnoutRequestedDirectionSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setNormal);
+bool CPTurnoutRequestedDirectionGet(CPState_t *state, CPTurnoutNames_t turnoutID);
 void CPTurnoutManualOperationsSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setManual);
+void CPTurnoutActualDirectionSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setActual);
+bool CPTurnoutActualDirectionGet(CPState_t *state, CPTurnoutNames_t turnoutID);
+void CPTurnoutLockSet(CPState_t *state, CPTurnoutNames_t turnoutID, bool setLock);
+bool CPTurnoutLockGet(CPState_t *state, CPTurnoutNames_t turnoutID);
 
 
 void CPTimelockStateSet(CPState_t *cpState, CPTimelockNames_t timelockID, CPTimelockState_t state);
@@ -100,7 +107,14 @@ void CPTimelockApply1HzTick(CPState_t* state);
 SignalHeadAspect_t CPSignalHeadGetAspect(CPState_t *cpState, CPSignalHeadNames_t signalID);
 
 // Control point to physical hardware functions
+void CPTurnoutsToOutputs(CPState_t *cpState, XIOControl* xio);
 void CPSignalsToOutputs(CPState_t *cpState, XIOControl* xio, bool blinkerOn);
 void CPTurnoutsToOutputs(CPState_t *cpState, XIOControl* xio);
+
+bool CPRouteSet(CPState_t *cpState, CPRoute_t route);
+void CPRouteClear(CPState_t *cpState, CPRoute_t route);
+void CPRouteAllClear(CPState_t *cpState);
+bool CPRouteTest(CPState_t *cpState, CPRoute_t route);
+bool CPRouteNoneSet(CPState_t *cpState);
 
 #endif
