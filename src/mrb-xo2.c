@@ -794,8 +794,8 @@ bool cpCodeRoute(CPState_t* cpState, CPRouteEntrance_t entrance, bool setRoute)
 void cpHandleTurnouts(CPState_t* state, XIOControl* xio)
 {
 	// Copy over the actual states of each turnout
-	CPTurnoutActualDirectionSet(state, TURNOUT_E_XOVER, CPInputStateGet(state, E_XOVER_ACTUAL_POS));
-	CPTurnoutActualDirectionSet(state, TURNOUT_W_XOVER, CPInputStateGet(state, W_XOVER_ACTUAL_POS));
+	CPTurnoutActualDirectionSet(state, TURNOUT_E_XOVER, !CPInputStateGet(state, E_XOVER_ACTUAL_POS));
+	CPTurnoutActualDirectionSet(state, TURNOUT_W_XOVER, !CPInputStateGet(state, W_XOVER_ACTUAL_POS));
 
 	// First, deal with the timelock
 	bool manualUnlockSwitchOn = !CPInputStateGet(state, TIMELOCK_SW_POS);//getTimelockSwitchState(xio);
@@ -958,6 +958,7 @@ int main(void)
 		{
 			mrbusPktQueuePush(&mrbusTxQueue, mrbTxBuffer, statusLen);
 			decisecs = 0;
+			changed = false;
 		}
 
 		// If we have a packet to be transmitted, try to send it here

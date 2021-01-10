@@ -25,20 +25,25 @@ LICENSE:
 #include "mrbus.h"
 #include "controlpoint.h"
 #include "config-hardware.h"
+#include <avr/eeprom.h>
 
 void CPMRBusVirtInputFilter(CPState_t* state, const uint8_t const *mrbRxBuffer)
 {
 	uint8_t i;
-	for (i=0; i<sizeof(state->inputs) / sizeof(CPInput_t); i++)
+	for (i=0; i<VINPUT_END; i++)
 	{
 		if (!state->inputs[i].isVirtual)
 			continue;
+			
+		uint8_t valPktSrc = eeprom_read_byte((const uint8_t*)(uint16_t)state->inputs[i].pktSrc);
+		uint8_t valPktType = eeprom_read_byte((const uint8_t*)(uint16_t)state->inputs[i].pktType);
+		uint8_t valPktBitByte = eeprom_read_byte((const uint8_t*)(uint16_t)state->inputs[i].pktBitByte);
 
-		uint8_t byteNum = BITBYTE_BYTENUM(state->inputs[i].pktBitByte);
-		uint8_t bitMask = BITBYTE_BITMASK(state->inputs[i].pktBitByte);
+		uint8_t byteNum = BITBYTE_BYTENUM(valPktBitByte);
+		uint8_t bitMask = BITBYTE_BITMASK(valPktBitByte);
 
-		if (mrbRxBuffer[MRBUS_PKT_SRC] != state->inputs[i].pktSrc 
-			|| mrbRxBuffer[MRBUS_PKT_TYPE] != state->inputs[i].pktType
+		if (mrbRxBuffer[MRBUS_PKT_SRC] != valPktSrc 
+			|| mrbRxBuffer[MRBUS_PKT_TYPE] != valPktType
 			|| byteNum > mrbRxBuffer[MRBUS_PKT_LEN])
 			continue;
 
