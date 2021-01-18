@@ -494,9 +494,14 @@ void setTimelockLED(XIOControl* xio, bool state)
 
 
 /*
- West M2 -------------------  M2 East
-             \        /
-      M1 -------------------  M1
+ West/North                          East/South
+              W-XOVER   E-XOVER
+                 |         |
+      M2W-> |-O  v         v
+    M2 ------------------------------  M2
+      M1W-> |-O   \        /  O-| <-M2E
+    M1 ------------------------------  M1
+                              O-| <-M1E
 */
 
 
@@ -654,15 +659,55 @@ bool cpSetTurnout(CPState_t* cpState, CPTurnoutNames_t turnout, bool setNormal)
 	return true;
 }
 
+bool cpClearRoute(CPState_t* cpState, CPRouteEntrance_t entrance)
+{
+	switch(entrance)
+	{
+		case ROUTE_ENTR_M1_EASTBOUND:
+			CPRouteClear(cpState, ROUTE_MAIN1_TO_MAIN2_EASTBOUND);
+			CPRouteClear(cpState, ROUTE_MAIN1_EASTBOUND);
+			break;
+
+		case ROUTE_ENTR_M1_WESTBOUND:
+			CPRouteClear(cpState, ROUTE_MAIN1_WESTBOUND);
+			CPRouteClear(cpState, ROUTE_MAIN1_TO_MAIN2_WESTBOUND);
+			break;
+
+		case ROUTE_ENTR_M2_EASTBOUND:
+			CPRouteClear(cpState, ROUTE_MAIN2_VIA_MAIN1_EASTBOUND);
+			CPRouteClear(cpState, ROUTE_MAIN2_TO_MAIN1_EASTBOUND);
+			CPRouteClear(cpState, ROUTE_MAIN2_EASTBOUND);
+			break;
+
+		case ROUTE_ENTR_M2_WESTBOUND:
+			CPRouteClear(cpState, ROUTE_MAIN2_VIA_MAIN1_WESTBOUND);
+			CPRouteClear(cpState, ROUTE_MAIN2_TO_MAIN1_WESTBOUND);
+			CPRouteClear(cpState, ROUTE_MAIN2_WESTBOUND);
+			break;
+		
+		default:
+			return false;
+	}
+
+	return true;
+}
+
+
 bool cpCodeRoute(CPState_t* cpState, CPRouteEntrance_t entrance, bool setRoute)
 {
 	if (STATE_LOCKED != CPTimelockStateGet(cpState, MAIN_TIMELOCK))
 		return false; // Can't set any route when the timelock is open
 
+
+	if (false == setRoute)
+		return cpClearRoute(cpState, entrance);
+
+
+	// At this point, we're setting routes
+
 	bool eastCrossover = CPTurnoutRequestedDirectionGet(cpState, TURNOUT_E_XOVER);
 	bool westCrossover = CPTurnoutRequestedDirectionGet(cpState, TURNOUT_W_XOVER);
 	
-	// Remember, with turnouts normal = true
 
 	switch(entrance)
 	{
